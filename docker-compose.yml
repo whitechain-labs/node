@@ -1,0 +1,289 @@
+name: whitechain-public-rpc
+
+x-op-reth-common: &op-reth-common
+  image: ${OP_RETH_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-reth:v2.0.0}
+  restart: unless-stopped
+  networks:
+    - public_rpc
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  env_file:
+    - .env
+  healthcheck:
+    test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8545' || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 12
+    start_period: 60s
+
+x-op-node-common: &op-node-common
+  image: ${OP_NODE_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.0}
+  restart: unless-stopped
+  networks:
+    - public_rpc
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  env_file:
+    - .env
+
+services:
+  # ----------------------------
+  # FULL SNAP NODE (pruned, execution-layer / snap sync)
+  # Fastest and simplest bootstrap. Pruned execution state. op-node runs
+  # --syncmode=execution-layer and op-reth snap-syncs the state from a
+  # trusted reth peer over EL P2P (WHITECHAIN_RETH_TRUSTED_PEERS).
+  # No DB snapshot needed.
+  # ----------------------------
+  full-snap-node-op-reth:
+    <<: *op-reth-common
+    profiles: ["full-snap-node"]
+    container_name: whitechain-full-snap-node-op-reth
+    ports:
+      - "${HOST_HTTP_PORT:-8545}:8545"
+      - "${HOST_WS_PORT:-8546}:8546"
+#      - "${HOST_EL_P2P_PORT:-30303}:30303/tcp"
+#      - "${HOST_EL_P2P_PORT:-30303}:30303/udp"
+    volumes:
+      - ./data/full-snap-node/op-reth:/db
+      - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
+      - ./keys/jwt.txt:/config/jwt.txt:ro
+    command: >
+      node
+      --chain=/config/genesis.json
+      --datadir=/db
+      --full
+      --http
+      --http.addr=0.0.0.0
+      --http.port=8545
+      --http.api=eth,net,web3,rpc
+      --ws
+      --ws.addr=0.0.0.0
+      --ws.port=8546
+      --ws.api=eth,net,web3,rpc
+      --authrpc.addr=0.0.0.0
+      --authrpc.port=8551
+      --authrpc.jwtsecret=/config/jwt.txt
+      --ipcdisable
+      --addr=0.0.0.0
+      --port=30303
+      --nat=extip:${PUBLIC_IP:?set PUBLIC_IP in .env}
+      --trusted-peers=${WHITECHAIN_RETH_TRUSTED_PEERS:?set WHITECHAIN_RETH_TRUSTED_PEERS in .env to the seed reth enode: enode://<pubkey>@<ip>:30303}
+      --rollup.sequencer-http=${WHITECHAIN_SEQUENCER_RPC:?set WHITECHAIN_SEQUENCER_RPC in .env}
+      --rollup.disable-tx-pool-gossip
+      --metrics=0.0.0.0:9001
+
+  full-snap-node-op-node:
+    <<: *op-node-common
+    profiles: ["full-snap-node"]
+    container_name: whitechain-full-snap-node-op-node
+    depends_on:
+      full-snap-node-op-reth:
+        condition: service_healthy
+    ports:
+      - "${HOST_OP_NODE_P2P_PORT:-9222}:9222/tcp"
+      - "${HOST_OP_NODE_P2P_PORT:-9222}:9222/udp"
+      # op-node RPC: bound to loopback only – local monitoring, never exposed to the network
+      - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
+    volumes:
+      - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
+      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./data/full-snap-node/op-node:/data
+    command: >
+      op-node
+      --l2=http://full-snap-node-op-reth:8551
+      --l2.jwt-secret=/jwt.txt
+      --rollup.config=/rollup.json
+      --rpc.addr=0.0.0.0
+      --rpc.port=9545
+      --l1=${L1_RPC_URL:?set L1_RPC_URL in .env}
+      --l1.beacon=${L1_BEACON_URL:?set L1_BEACON_URL in .env}
+      --l1.rpckind=${L1_RPC_KIND:-basic}
+      --l2.enginekind=reth
+      --syncmode=execution-layer
+      --p2p.listen.ip=0.0.0.0
+      --p2p.listen.tcp=9222
+      --p2p.listen.udp=9222
+      --p2p.advertise.ip=${PUBLIC_IP:?set PUBLIC_IP in .env}
+      --p2p.static=${WHITECHAIN_OP_NODE_P2P_STATIC:-}
+      --p2p.sync.req-resp=true
+      --p2p.sync.onlyreqtostatic=${OP_NODE_ONLY_REQ_TO_STATIC:-false}
+      --p2p.peerstore.path=/data/peerstore
+      --p2p.discovery.path=/data/discovery
+      --safedb.path=/data/safedb
+      --metrics.enabled
+      --metrics.addr=0.0.0.0
+      --metrics.port=7300
+
+  # ----------------------------
+  # FULL NODE (pruned, consensus-layer sync)
+  # Pruned execution state. op-node derives the chain from L1 and
+  # re-executes every block (no snap sync). Restore a DB snapshot to
+  # skip the long initial sync.
+  # ----------------------------
+  full-node-op-reth:
+    <<: *op-reth-common
+    profiles: ["full-node"]
+    container_name: whitechain-full-node-op-reth
+    ports:
+      - "${HOST_HTTP_PORT:-8545}:8545"
+      - "${HOST_WS_PORT:-8546}:8546"
+#      - "${HOST_EL_P2P_PORT:-30303}:30303/tcp"
+#      - "${HOST_EL_P2P_PORT:-30303}:30303/udp"
+    volumes:
+      - ./data/full-node/op-reth:/db
+      - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
+      - ./keys/jwt.txt:/config/jwt.txt:ro
+    command: >
+      node
+      --chain=/config/genesis.json
+      --datadir=/db
+      --full
+      --http
+      --http.addr=0.0.0.0
+      --http.port=8545
+      --http.api=eth,net,web3,rpc
+      --ws
+      --ws.addr=0.0.0.0
+      --ws.port=8546
+      --ws.api=eth,net,web3,rpc
+      --authrpc.addr=0.0.0.0
+      --authrpc.port=8551
+      --authrpc.jwtsecret=/config/jwt.txt
+      --ipcdisable
+      --port=30303
+      --nat=extip:${PUBLIC_IP:?set PUBLIC_IP in .env}
+      --rollup.sequencer-http=${WHITECHAIN_SEQUENCER_RPC:?set WHITECHAIN_SEQUENCER_RPC in .env}
+      --rollup.disable-tx-pool-gossip
+      --metrics=0.0.0.0:9001
+
+  full-node-op-node:
+    <<: *op-node-common
+    profiles: ["full-node"]
+    container_name: whitechain-full-node-op-node
+    depends_on:
+      full-node-op-reth:
+        condition: service_healthy
+    ports:
+      - "${HOST_OP_NODE_P2P_PORT:-9222}:9222/tcp"
+      - "${HOST_OP_NODE_P2P_PORT:-9222}:9222/udp"
+      # op-node RPC: bound to loopback only – local monitoring, never exposed to the network
+      - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
+    volumes:
+      - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
+      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./data/full-node/op-node:/data
+    command: >
+      op-node
+      --l2=http://full-node-op-reth:8551
+      --l2.jwt-secret=/jwt.txt
+      --rollup.config=/rollup.json
+      --rpc.addr=0.0.0.0
+      --rpc.port=9545
+      --l1=${L1_RPC_URL:?set L1_RPC_URL in .env}
+      --l1.beacon=${L1_BEACON_URL:?set L1_BEACON_URL in .env}
+      --l1.rpckind=${L1_RPC_KIND:-basic}
+      --l2.enginekind=reth
+      --p2p.listen.ip=0.0.0.0
+      --p2p.listen.tcp=9222
+      --p2p.listen.udp=9222
+      --p2p.advertise.ip=${PUBLIC_IP:?set PUBLIC_IP in .env}
+      --p2p.static=${WHITECHAIN_OP_NODE_P2P_STATIC:-}
+      --p2p.sync.req-resp=true
+      --p2p.sync.onlyreqtostatic=${OP_NODE_ONLY_REQ_TO_STATIC:-false}
+      --p2p.peerstore.path=/data/peerstore
+      --p2p.discovery.path=/data/discovery
+      --safedb.path=/data/safedb
+      --metrics.enabled
+      --metrics.addr=0.0.0.0
+      --metrics.port=7300
+
+  # ----------------------------
+  # ARCHIVE NODE (full history, consensus-layer sync)
+  # Full historical state + debug/trace/txpool/reth namespaces. op-node
+  # re-executes every block from L1 (no snap sync). Restore a DB snapshot
+  # to skip the long initial sync.
+  # ----------------------------
+  archive-node-op-reth:
+    <<: *op-reth-common
+    profiles: ["archive-node"]
+    container_name: whitechain-archive-node-op-reth
+    ports:
+      - "${HOST_HTTP_PORT:-8545}:8545"
+      - "${HOST_WS_PORT:-8546}:8546"
+#      - "${HOST_EL_P2P_PORT:-30303}:30303/tcp"
+#      - "${HOST_EL_P2P_PORT:-30303}:30303/udp"
+    volumes:
+      - ./data/archive-node/op-reth:/db
+      - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
+      - ./keys/jwt.txt:/config/jwt.txt:ro
+    command: >
+      node
+      --chain=/config/genesis.json
+      --datadir=/db
+      --http
+      --http.addr=0.0.0.0
+      --http.port=8545
+      --http.api=eth,net,web3,rpc,debug,trace,txpool,reth
+      --ws
+      --ws.addr=0.0.0.0
+      --ws.port=8546
+      --ws.api=eth,net,web3,rpc
+      --authrpc.addr=0.0.0.0
+      --authrpc.port=8551
+      --authrpc.jwtsecret=/config/jwt.txt
+      --ipcdisable
+      --addr=0.0.0.0
+      --port=30303
+      --nat=extip:${PUBLIC_IP:?set PUBLIC_IP in .env}
+      --rollup.sequencer-http=${WHITECHAIN_SEQUENCER_RPC:?set WHITECHAIN_SEQUENCER_RPC in .env}
+      --rollup.disable-tx-pool-gossip
+      --metrics=0.0.0.0:9001
+      --rpc.max-connections=${RPC_MAX_CONNECTIONS:-1000}
+      --rpc.max-logs-per-response=${RPC_MAX_LOGS_PER_RESPONSE:-20000}
+      --rpc.max-blocks-per-filter=${RPC_MAX_BLOCKS_PER_FILTER:-100000}
+      --rpc.max-tracing-requests=${RPC_MAX_TRACING_REQUESTS:-8}
+
+  archive-node-op-node:
+    <<: *op-node-common
+    profiles: ["archive-node"]
+    container_name: whitechain-archive-node-op-node
+    depends_on:
+      archive-node-op-reth:
+        condition: service_healthy
+    ports:
+      - "${HOST_OP_NODE_P2P_PORT:-9222}:9222/tcp"
+      - "${HOST_OP_NODE_P2P_PORT:-9222}:9222/udp"
+      # op-node RPC: bound to loopback only – local monitoring, never exposed to the network
+      - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
+    volumes:
+      - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
+      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./data/archive-node/op-node:/data
+    command: >
+      op-node
+      --l2=http://archive-node-op-reth:8551
+      --l2.jwt-secret=/jwt.txt
+      --rollup.config=/rollup.json
+      --rpc.addr=0.0.0.0
+      --rpc.port=9545
+      --l1=${L1_RPC_URL:?set L1_RPC_URL in .env}
+      --l1.beacon=${L1_BEACON_URL:?set L1_BEACON_URL in .env}
+      --l1.rpckind=${L1_RPC_KIND:-basic}
+      --l2.enginekind=reth
+      --p2p.listen.ip=0.0.0.0
+      --p2p.listen.tcp=9222
+      --p2p.listen.udp=9222
+      --p2p.advertise.ip=${PUBLIC_IP:?set PUBLIC_IP in .env}
+      --p2p.static=${WHITECHAIN_OP_NODE_P2P_STATIC:-}
+      --p2p.sync.req-resp=true
+      --p2p.sync.onlyreqtostatic=${OP_NODE_ONLY_REQ_TO_STATIC:-false}
+      --p2p.peerstore.path=/data/peerstore
+      --p2p.discovery.path=/data/discovery
+      --safedb.path=/data/safedb
+      --metrics.enabled
+      --metrics.addr=0.0.0.0
+      --metrics.port=7300
+
+networks:
+  public_rpc:
+    driver: bridge

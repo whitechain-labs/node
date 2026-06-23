@@ -1,0 +1,4 @@
+.env
+data/
+keys/jwt.txt
+keys/p2p-key.txt
