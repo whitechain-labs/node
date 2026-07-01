@@ -41,8 +41,8 @@ services:
     ports:
       - "${HOST_HTTP_PORT:-8545}:8545"
       - "${HOST_WS_PORT:-8546}:8546"
-#      - "${HOST_EL_P2P_PORT:-30303}:30303/tcp"
-#      - "${HOST_EL_P2P_PORT:-30303}:30303/udp"
+      - "${HOST_EL_P2P_PORT:-30303}:30303/tcp"
+      - "${HOST_EL_P2P_PORT:-30303}:30303/udp"
     volumes:
       - ./data/full-snap-node/op-reth:/db
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
@@ -55,7 +55,7 @@ services:
       --http
       --http.addr=0.0.0.0
       --http.port=8545
-      --http.api=eth,net,web3,rpc
+      --http.api=eth,net,web3,rpc,admin
       --ws
       --ws.addr=0.0.0.0
       --ws.port=8546
@@ -66,9 +66,10 @@ services:
       --ipcdisable
       --addr=0.0.0.0
       --port=30303
-      --nat=extip:${PUBLIC_IP:?set PUBLIC_IP in .env}
-      --trusted-peers=${WHITECHAIN_RETH_TRUSTED_PEERS:?set WHITECHAIN_RETH_TRUSTED_PEERS in .env to the seed reth enode: enode://<pubkey>@<ip>:30303}
-      --rollup.sequencer-http=${WHITECHAIN_SEQUENCER_RPC:?set WHITECHAIN_SEQUENCER_RPC in .env}
+      --nat=none
+      --trusted-peers=${WHITECHAIN_RETH_TRUSTED_PEERS}
+      --bootnodes=${WHITECHAIN_RETH_TRUSTED_PEERS}
+      --rollup.sequencer-http=${WHITECHAIN_PUBLIC_RPC:?set WHITECHAIN_PUBLIC_RPC in .env}
       --rollup.disable-tx-pool-gossip
       --metrics=0.0.0.0:9001
 
@@ -104,7 +105,8 @@ services:
       --p2p.listen.tcp=9222
       --p2p.listen.udp=9222
       --p2p.advertise.ip=${PUBLIC_IP:?set PUBLIC_IP in .env}
-      --p2p.static=${WHITECHAIN_OP_NODE_P2P_STATIC:-}
+      --p2p.static=${WHITECHAIN_PUBLIC_OP_NODE_P2P:-}
+      --p2p.no-discovery=true
       --p2p.sync.req-resp=true
       --p2p.sync.onlyreqtostatic=${OP_NODE_ONLY_REQ_TO_STATIC:-false}
       --p2p.peerstore.path=/data/peerstore
@@ -151,8 +153,9 @@ services:
       --authrpc.jwtsecret=/config/jwt.txt
       --ipcdisable
       --port=30303
-      --nat=extip:${PUBLIC_IP:?set PUBLIC_IP in .env}
-      --rollup.sequencer-http=${WHITECHAIN_SEQUENCER_RPC:?set WHITECHAIN_SEQUENCER_RPC in .env}
+      --nat=none
+      --trusted-peers=enode://4bde475e393baab340e0d8c64347e4d24ef3ce3ccc304bd5326b816a8340bd7a0c0e51f7525b9aee198c67fe66c17af38bcc15e19e5188ac88c40b24e20ce5e1@135.125.160.218:30303
+      --rollup.sequencer-http=${WHITECHAIN_PUBLIC_RPC:?set WHITECHAIN_PUBLIC_RPC in .env}
       --rollup.disable-tx-pool-gossip
       --metrics=0.0.0.0:9001
 
@@ -187,7 +190,8 @@ services:
       --p2p.listen.tcp=9222
       --p2p.listen.udp=9222
       --p2p.advertise.ip=${PUBLIC_IP:?set PUBLIC_IP in .env}
-      --p2p.static=${WHITECHAIN_OP_NODE_P2P_STATIC:-}
+      --p2p.static=${WHITECHAIN_PUBLIC_OP_NODE_P2P:-}
+      --p2p.no-discovery=true
       --p2p.sync.req-resp=true
       --p2p.sync.onlyreqtostatic=${OP_NODE_ONLY_REQ_TO_STATIC:-false}
       --p2p.peerstore.path=/data/peerstore
@@ -234,8 +238,8 @@ services:
       --ipcdisable
       --addr=0.0.0.0
       --port=30303
-      --nat=extip:${PUBLIC_IP:?set PUBLIC_IP in .env}
-      --rollup.sequencer-http=${WHITECHAIN_SEQUENCER_RPC:?set WHITECHAIN_SEQUENCER_RPC in .env}
+      --nat=none
+      --rollup.sequencer-http=${WHITECHAIN_PUBLIC_RPC:?set WHITECHAIN_PUBLIC_RPC in .env}
       --rollup.disable-tx-pool-gossip
       --metrics=0.0.0.0:9001
       --rpc.max-connections=${RPC_MAX_CONNECTIONS:-1000}
@@ -274,7 +278,8 @@ services:
       --p2p.listen.tcp=9222
       --p2p.listen.udp=9222
       --p2p.advertise.ip=${PUBLIC_IP:?set PUBLIC_IP in .env}
-      --p2p.static=${WHITECHAIN_OP_NODE_P2P_STATIC:-}
+      --p2p.static=${WHITECHAIN_PUBLIC_OP_NODE_P2P:-}
+      --p2p.no-discovery=true
       --p2p.sync.req-resp=true
       --p2p.sync.onlyreqtostatic=${OP_NODE_ONLY_REQ_TO_STATIC:-false}
       --p2p.peerstore.path=/data/peerstore

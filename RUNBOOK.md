@@ -19,7 +19,7 @@ The Whitechain sequencer is closed and is not directly reachable from the public
 
 1. Reads L1 batches from your own Ethereum L1 RPC and Beacon endpoints.
 2. Pulls unsafe blocks from the Whitechain network over libp2p.
-3. Forwards `eth_sendRawTransaction` calls to the public Whitechain RPC URL (`WHITECHAIN_SEQUENCER_RPC`), which routes them to the sequencer.
+3. Forwards `eth_sendRawTransaction` calls to the public Whitechain RPC URL (`WHITECHAIN_PUBLIC_RPC`), which routes them to the sequencer.
 
 You only need:
 
@@ -72,7 +72,7 @@ The stack ships three profiles. Pick one with `PROFILE=<profile>` or a per-profi
 | --- | --- | --- |
 | CPU | 4+ cores | 8+ cores |
 | RAM | 16 GB | 32 GB |
-| Storage | NVMe SSD, 2× current chain size + 20% | NVMe SSD, sized for full history |
+| Storage | NVMe SSD, 500 GB min / 1 TB recommended (≥ 2× current chain size + 20%) | NVMe SSD, sized for full history (≥ 1 TB) |
 | Network | 100 Mbps+ | 1 Gbps |
 
 Disk usage grows with the chain. Restoring a snapshot (below) does not change the steady-state growth – it only saves the initial sync time.
@@ -115,8 +115,8 @@ Two static files for the chosen network:
 
 Public endpoints and (optionally) a snapshot:
 
-* `WHITECHAIN_SEQUENCER_RPC` – public Whitechain JSON-RPC URL, the transaction-forwarding target
-* `WHITECHAIN_OP_NODE_P2P_STATIC` – optional static op-node peer, `/dns4/<host>/tcp/9222/p2p/<peerID>` or `/ip4/<ip>/tcp/9222/p2p/<peerID>`
+* `WHITECHAIN_PUBLIC_RPC` – public Whitechain JSON-RPC URL, the transaction-forwarding target
+* `WHITECHAIN_PUBLIC_OP_NODE_P2P` – optional static op-node peer, `/dns4/<host>/tcp/9222/p2p/<peerID>` or `/ip4/<ip>/tcp/9222/p2p/<peerID>`
 * `WHITECHAIN_RETH_TRUSTED_PEERS` – trusted reth enode for `full-snap-node` to snap-sync from
 * A published `op-reth` database snapshot URL (recommended for `full-node` / `archive-node`)
 
@@ -143,7 +143,7 @@ Public endpoints and (optionally) a snapshot:
    ```
    WHITECHAIN_NETWORK=mainnet
    PUBLIC_IP=203.0.113.10
-   WHITECHAIN_SEQUENCER_RPC=https://rpc.whitechain.io
+   WHITECHAIN_PUBLIC_RPC=https://rpc.whitechain.io
 
    L1_RPC_URL=https://your-l1-rpc.example.com
    L1_BEACON_URL=https://your-l1-beacon.example.com
@@ -220,6 +220,32 @@ Rules of thumb:
 * You still need a working L1 RPC + Beacon to derive everything after the snapshot block.
 * Without a snapshot, the node re-executes from genesis – expect a long initial sync.
 
+## Creating a Backup
+
+This is the procedure the Whitechain team uses to produce the published `op-reth` snapshots, and the same steps you can follow to take your own daily backup of a `full-node` / `archive-node` datadir. Back up only the `op-reth` data; the `op-node` directory rebuilds itself.
+
+1. Stop the node to get a consistent on-disk database:
+
+   ```bash
+   make down PROFILE=full-node
+   ```
+
+2. Archive and compress the `op-reth` datadir (`db`, `static_files`, and related folders):
+
+   ```bash
+   tar -c -C data/full-node/op-reth . | zstd -o op-reth-mainnet-full.tar.zst
+   ```
+
+3. Restart the node so it resumes following the chain:
+
+   ```bash
+   make up PROFILE=full-node
+   ```
+
+4. Copy the archive to the location clients download from (object storage, mirror, etc.). Clients then restore it as in [Restoring from a Snapshot](#restoring-from-a-snapshot).
+
+> **Note:** Match the archive name to the network and profile it was taken from. A pruned (`full-node`) backup cannot serve archive queries.
+
 ## Data Layout
 
 Each profile keeps its own data subtree so profiles never clash:
@@ -234,6 +260,8 @@ data/
 Snapshots are restored into `data/<profile>/op-reth/`.
 
 ### Syncing
+
+> **Warning:** In the first few minutes after start the node may report no peers ready to handle block requests until the static peer handshake completes. This is expected – wait for the handshake with `WHITECHAIN_PUBLIC_OP_NODE_P2P` to finish and a connected peer to appear before treating it as an error.
 
 Watch the logs:
 
@@ -294,7 +322,7 @@ make up PROFILE=full-node
 
 ## Sending Transactions
 
-Applications submit transactions to your local `op-reth` HTTP port. The node forwards them to `WHITECHAIN_SEQUENCER_RPC`, which routes them to the sequencer.
+Applications submit transactions to your local `op-reth` HTTP port. The node forwards them to `WHITECHAIN_PUBLIC_RPC`, which routes them to the sequencer.
 
 ```bash
 curl -X POST http://127.0.0.1:8545 \
@@ -357,7 +385,7 @@ Place `genesis.json` and `rollup.json` for the chosen network under `artifacts/<
 
 Compose refuses to start without `PUBLIC_IP`. Set it to the public IP that the node should advertise for P2P.
 
-### `set WHITECHAIN_SEQUENCER_RPC in .env`
+### `set WHITECHAIN_PUBLIC_RPC in .env`
 
 You did not set the transaction-forwarding target. Set it to the public Whitechain RPC URL.
 

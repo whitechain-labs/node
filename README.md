@@ -101,7 +101,7 @@ Notes:
 | --- | --- | --- |
 | CPU | 4+ cores | 8+ cores |
 | RAM | 16 GB | 32 GB |
-| Storage | NVMe SSD, 2× current chain size + 20% | NVMe SSD, sized for full history |
+| Storage | NVMe SSD, 500 GB min / 1 TB recommended (≥ 2× current chain size + 20%) | NVMe SSD, sized for full history (≥ 1 TB) |
 | Network | 100 Mbps+ | 1 Gbps |
 
 ## Quick Start
@@ -121,7 +121,7 @@ Notes:
    cp .env.mainnet.example .env   # or .env.testnet.example
    ```
 
-   Fill in at least `PUBLIC_IP`, `WHITECHAIN_SEQUENCER_RPC`, `L1_RPC_URL`, `L1_BEACON_URL` (see [Configuration](#configuration)). For `full-snap-node` also set `WHITECHAIN_RETH_TRUSTED_PEERS`.
+   Fill in at least `PUBLIC_IP`, `WHITECHAIN_PUBLIC_RPC`, `L1_RPC_URL`, `L1_BEACON_URL` (see [Configuration](#configuration)). For `full-snap-node` also set `WHITECHAIN_RETH_TRUSTED_PEERS`.
 
 3. (Recommended for `full-node` / `archive-node`) Restore an `op-reth` snapshot to skip the long initial sync – see [Database snapshots](#database-snapshots-skip-the-long-initial-sync).
 
@@ -153,7 +153,7 @@ Required `.env` variables:
 | --- | --- |
 | `WHITECHAIN_NETWORK` | Subdirectory under `artifacts/`, e.g. `mainnet` or `testnet` |
 | `PUBLIC_IP` | Public IP of this host, advertised for op-reth and op-node P2P |
-| `WHITECHAIN_SEQUENCER_RPC` | Public Whitechain RPC, used as `--rollup.sequencer-http` for op-reth (transaction forwarding) |
+| `WHITECHAIN_PUBLIC_RPC` | Public Whitechain RPC, used as `--rollup.sequencer-http` for op-reth (transaction forwarding) |
 | `L1_RPC_URL` | Operator-provided Ethereum L1 RPC endpoint |
 | `L1_BEACON_URL` | Operator-provided Ethereum L1 Beacon endpoint |
 
@@ -168,7 +168,7 @@ Optional variables (with defaults):
 | Variable | Default | Description |
 | --- | --- | --- |
 | `L1_RPC_KIND` | `basic` | One of `alchemy`, `quicknode`, `infura`, `parity`, `nethermind`, `debug_geth`, `erigon`, `standard`, `any` if your provider supports extra receipt methods |
-| `WHITECHAIN_OP_NODE_P2P_STATIC` | empty | Static op-node peer multiaddr `/dns4/<host>/tcp/9222/p2p/<peerID>` |
+| `WHITECHAIN_PUBLIC_OP_NODE_P2P` | empty | Static op-node peer multiaddr `/dns4/<host>/tcp/9222/p2p/<peerID>` |
 | `OP_NODE_ONLY_REQ_TO_STATIC` | `false` | Restrict unsafe-block requests to the static peer only |
 | `OP_RETH_IMAGE` | `op-reth:v2.0.0` | Pin the op-reth image |
 | `OP_NODE_IMAGE` | `op-node:v1.19.0` | Pin the op-node image |
@@ -265,7 +265,7 @@ curl -s -X POST http://127.0.0.1:9545 \
 
 ## Sending transactions
 
-Applications submit transactions to the local `op-reth` HTTP port. The node forwards them to `WHITECHAIN_SEQUENCER_RPC`, which routes them to the closed sequencer. You need no direct access to the sequencer.
+Applications submit transactions to the local `op-reth` HTTP port. The node forwards them to `WHITECHAIN_PUBLIC_RPC`, which routes them to the closed sequencer. You need no direct access to the sequencer.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8545 \
