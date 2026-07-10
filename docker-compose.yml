@@ -1,7 +1,7 @@
 name: whitechain-public-rpc
 
 x-op-reth-common: &op-reth-common
-  image: ${OP_RETH_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-reth:v2.0.0}
+  image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:latest}
   restart: unless-stopped
   networks:
     - public_rpc
@@ -17,7 +17,7 @@ x-op-reth-common: &op-reth-common
     start_period: 60s
 
 x-op-node-common: &op-node-common
-  image: ${OP_NODE_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.0}
+  image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:latest}
   restart: unless-stopped
   networks:
     - public_rpc
