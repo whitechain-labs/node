@@ -197,7 +197,7 @@ Only one profile runs at a time, so all profiles share the same host ports. Each
 | EL P2P (TCP+UDP) | `30303` (disabled by default) | `HOST_EL_P2P_PORT` |
 
 - The Engine API (`8551`) stays inside the compose network and is not published to the host.
-- op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host, never from the network. The `admin` namespace is not enabled, so it serves only the read-only `optimism` and `opp2p` status namespaces.
+- op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host, never from the network. The `admin` namespace is not enabled, so it serves only the read-only `optimism`, `opp2p`, and `superroot` namespaces.
 - The EL P2P port (`30303`) is **not** published by default – snap sync only needs outbound connectivity to the trusted peer. Its host mapping is commented out in `docker-compose.yml`; uncomment it only if you want inbound EL peering.
 - Only the public JSON-RPC (`8545`) and WebSocket (`8546`) ports are network-facing, and they expose only read-only namespaces. Still, put them behind a firewall, reverse proxy, or rate limiter before serving untrusted clients.
 - Run only one profile at a time – they all bind the same host ports. To run two side by side on one host, override one profile's ports in `.env`.
@@ -278,7 +278,7 @@ curl -s -X POST http://127.0.0.1:8545 \
 - `full-snap-node` / `full-node` op-reth HTTP/WS: `eth`, `net`, `web3`, `rpc`
 - `archive-node` op-reth HTTP: `eth`, `net`, `web3`, `rpc`, `debug`, `trace`, `txpool`, `reth`; WS: `eth`, `net`, `web3`, `rpc`
 - op-reth exposes no `admin` namespace on any profile – all exposed namespaces are read-only.
-- op-node RPC (`9545`, loopback-only): `optimism`, `opp2p` (the `admin` namespace is not enabled)
+- op-node RPC (`9545`, loopback-only): `optimism`, `opp2p`, `superroot` (the `admin` namespace is not enabled). `superroot` is a read-only OP Stack interop API (`superroot_getSuperRootAtTimestamp`) that op-node registers unconditionally; it cannot be disabled and is unused in this single-chain deployment.
 
 ## Updating the node
 

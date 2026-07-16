@@ -89,7 +89,7 @@ Only one profile runs at a time, so all profiles share the same host ports. Each
 | op-node P2P (TCP+UDP) | `9222` | `HOST_OP_NODE_P2P_PORT` |
 | EL P2P (TCP+UDP) | `30303` (disabled by default) | `HOST_EL_P2P_PORT` |
 
-The Engine API (`8551`) stays on the internal compose network and is not published. op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host but never from the network – and the `admin` namespace is not enabled, so it serves only the read-only `optimism` and `opp2p` status namespaces. The EL P2P port (`30303`) is not published by default (snap sync only needs outbound connectivity to the trusted peer); its host mapping is commented out in `docker-compose.yml`, uncomment it only if you want inbound EL peering. Run only one profile at a time – they all bind the same host ports; to run two side by side on one host, override one profile's ports in `.env`.
+The Engine API (`8551`) stays on the internal compose network and is not published. op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host but never from the network – and the `admin` namespace is not enabled, so it serves only the read-only `optimism`, `opp2p`, and `superroot` namespaces. The EL P2P port (`30303`) is not published by default (snap sync only needs outbound connectivity to the trusted peer); its host mapping is commented out in `docker-compose.yml`, uncomment it only if you want inbound EL peering. Run only one profile at a time – they all bind the same host ports; to run two side by side on one host, override one profile's ports in `.env`.
 
 ### Software
 
@@ -345,6 +345,7 @@ You do not need any direct access to the sequencer. The pattern is the same as o
 
 * `optimism` – rollup state, including `optimism_syncStatus` and `optimism_outputAtBlock`
 * `opp2p` – P2P peer information, including `opp2p_self` and `opp2p_peers`
+* `superroot` – read-only OP Stack interop API (`superroot_getSuperRootAtTimestamp`, returns the super-root commitment at a given timestamp). op-node registers this namespace unconditionally – it cannot be disabled or hidden by configuration. It exposes no administrative or state-mutating methods and is unused in this single-chain deployment.
 
 The `admin` namespace is not enabled (no `--rpc.enable-admin`), so op-node exposes no administrative methods.
 
@@ -365,7 +366,7 @@ If the upgrade includes a new hardfork, replace `artifacts/<network>/rollup.json
 ## Security Notes
 
 * The Engine API on port `8551` is bound only to the internal compose network and is not exposed to the host. Do not publish it.
-* op-node RPC on port `9545` is bound to loopback (`127.0.0.1`) only, so it is reachable from the host but not from the network. The `admin` namespace is not enabled, so it serves only read-only rollup and P2P status methods.
+* op-node RPC on port `9545` is bound to loopback (`127.0.0.1`) only, so it is reachable from the host but not from the network. The `admin` namespace is not enabled, so it serves only read-only rollup, P2P, and super-root status methods (`optimism`, `opp2p`, `superroot`).
 * op-reth exposes no `admin` namespace on any profile. The public JSON-RPC (`8545`) and WebSocket (`8546`) ports serve only read-only namespaces (`eth`, `net`, `web3`, `rpc`; archive adds `debug`, `trace`, `txpool`, `reth`). The node exposes no state-mutating or administrative control surface.
 * `keys/jwt.txt` is local to your machine and is used only between `op-node` and `op-reth` in this stack. It does not need to match anything outside.
 * The node holds no project-side private keys. Operate it as a read and forward node.
@@ -437,3 +438,48 @@ This setup is a follow-only RPC node. It does not include:
 * Flashblocks pre-confirmation stream
 
 If your application needs sub-second pre-confirmations, contact the Whitechain team for the Flashblocks WebSocket URL and a separate guide. The current `public-rpc-node` stack does not subscribe to the Flashblocks stream.
+
+## Appendix: reth Staged Sync Pipeline
+
+During initial sync (and any large catch-up after downtime) op-reth logs lines like:
+
+```
+INFO Received headers total=1440 from_block=1440 to_block=1
+INFO Finished stage pipeline_stages=1/14 stage=Headers checkpoint=2611440 target=None stage_progress=100.00%
+INFO Finished stage pipeline_stages=2/14 stage=Bodies checkpoint=2611440 target=2611440 stage_progress=100.00%
+INFO Finished stage pipeline_stages=3/14 stage=SenderRecovery checkpoint=2611440 target=2611440
+```
+
+This is reth's **staged sync** pipeline. Instead of processing each block end-to-end, reth runs the whole block range through 14 specialized stages – each stage performs one operation for the entire range, which is much faster than block-by-block processing thanks to sequential disk writes.
+
+The pipeline runs on **every profile** (`full-snap-node`, `full-node`, `archive-node`) – it is not specific to snap sync. It is used whenever op-reth is far behind the chain head: on a fresh database, after restoring a snapshot, or after significant downtime. Once the node is caught up, live blocks arrive through the Engine API (`Received new payload` / forkchoice updates) and the pipeline stays idle unless the node falls behind again.
+
+| # | Stage | What it does |
+| --- | --- | --- |
+| 1 | Headers | Downloads block headers from the chain head backwards to the local checkpoint |
+| 2 | Bodies | Downloads block bodies (transactions) |
+| 3 | SenderRecovery | Recovers sender addresses from transaction signatures (ECDSA, CPU-bound) |
+| 4 | Execution | Executes all transactions in the EVM and computes state changes – the heaviest stage |
+| 5 | PruneSenderRecovery | Drops recovery data no longer needed in pruned (`--full`) mode |
+| 6 | MerkleUnwind | Unwinds the Merkle trie on reorgs (instant during forward sync) |
+| 7 | AccountHashing | Hashes account addresses for the state trie |
+| 8 | StorageHashing | Hashes contract storage slots |
+| 9 | MerkleExecute | Builds the Merkle Patricia Trie, computes the state root, and verifies it against the headers |
+| 10 | TransactionLookup | Builds the transaction-hash → block index (serves `eth_getTransactionByHash`) |
+| 11 | IndexAccountHistory | Builds the account-change history index |
+| 12 | IndexStorageHistory | Builds the storage-change history index |
+| 13 | Prune | Prunes historical data according to the pruning config (pruned profiles keep a recent-blocks window) |
+| 14 | Finish | Marks the head as synced – the node goes live only after this stage reaches the target |
+
+Operational notes:
+
+* **RPC reports block 0 until the pipeline completes.** `eth_blockNumber` (and RPC data in general) only advances once the `Finish` stage reaches the chain head. A node answering `0x0` during initial sync is expected behavior, not a fault. When the pipeline completes, the height jumps directly to the head and then follows it live.
+* **Stages repeat in batches.** The pipeline commits ranges of blocks in rounds, so the same stage names reappear in the logs several times per sync. Interrupting the node during sync is safe but rolls progress back to the last committed batch.
+* **Stage order is deliberate.** Execution (4) computes the state; the Merkle stages (7–9) then verify the computed state root against the downloaded headers, so all data received from peers is cryptographically validated.
+* **Progress check.** During `Headers`, the checkpoint stays at 0 (headers are written once the reverse download finishes) – watch the `Received headers ... to_block=N` lines instead (N moves toward 0). From `Bodies` onward, watch `checkpoint=X target=Y` in the periodic `Status` lines:
+
+  ```bash
+  docker logs -f whitechain-<profile>-op-reth 2>&1 | grep --line-buffered -iE "stage=|received headers|finished stage"
+  ```
+
+  When the `Status` line switches from `stage=...` to `latest_block=<height>`, the pipeline is done and the RPC is serving live data.

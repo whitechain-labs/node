@@ -10,7 +10,7 @@ x-op-reth-common: &op-reth-common
   env_file:
     - .env
   healthcheck:
-    test: ["CMD-SHELL", "bash -c '</dev/tcp/127.0.0.1/8545' || exit 1"]
+    test: ["CMD-SHELL", "netstat -ltn | grep -q ':8545 ' || exit 1"]
     interval: 10s
     timeout: 5s
     retries: 12
@@ -55,7 +55,7 @@ services:
       --http
       --http.addr=0.0.0.0
       --http.port=8545
-      --http.api=eth,net,web3,rpc,admin
+      --http.api=eth,net,web3,rpc
       --ws
       --ws.addr=0.0.0.0
       --ws.port=8546
@@ -154,7 +154,7 @@ services:
       --ipcdisable
       --port=30303
       --nat=none
-      --trusted-peers=enode://4bde475e393baab340e0d8c64347e4d24ef3ce3ccc304bd5326b816a8340bd7a0c0e51f7525b9aee198c67fe66c17af38bcc15e19e5188ac88c40b24e20ce5e1@135.125.160.218:30303
+      --trusted-peers=${WHITECHAIN_RETH_TRUSTED_PEERS}
       --rollup.sequencer-http=${WHITECHAIN_PUBLIC_RPC:?set WHITECHAIN_PUBLIC_RPC in .env}
       --rollup.disable-tx-pool-gossip
       --metrics=0.0.0.0:9001
