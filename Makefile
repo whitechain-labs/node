@@ -5,10 +5,12 @@ COMPOSE  ?= docker compose
 
 # Node profile to operate on: full-snap-node | full-node | archive-node
 PROFILE ?= full-snap-node
+VALID_PROFILES := full-snap-node full-node archive-node
 
 export WHITECHAIN_NETWORK
+export PROFILE
 
-.PHONY: help ensure-jwt check-env \
+.PHONY: help ensure-jwt check-env check-profile \
         up down reup ps logs config \
         up-full-snap-node down-full-snap-node reup-full-snap-node ps-full-snap-node logs-full-snap-node \
         up-full-node down-full-node reup-full-node ps-full-node logs-full-node \
@@ -47,31 +49,40 @@ ensure-jwt:
 		echo "Using existing $(JWT_FILE)"; \
 	fi
 
+
 check-env:
-	@test -f .env || (echo "Missing .env. Copy .env.mainnet.example (or .env.testnet.example) to .env and fill values." && exit 1)
-	@set -a; . ./.env; set +a; \
-	test -f "artifacts/$$WHITECHAIN_NETWORK/genesis.json" || (echo "Missing artifacts/$$WHITECHAIN_NETWORK/genesis.json" && exit 1); \
-	test -f "artifacts/$$WHITECHAIN_NETWORK/rollup.json"  || (echo "Missing artifacts/$$WHITECHAIN_NETWORK/rollup.json"  && exit 1)
+	@test -f .env || { echo "Missing .env. Copy .env.mainnet.example (or .env.testnet.example) to .env and fill values." >&2; exit 1; }
+	@network=$$(sed -n 's/^[[:space:]]*WHITECHAIN_NETWORK[[:space:]]*=[[:space:]]*\([^[:space:]#]*\).*$$/\1/p' .env | tail -n 1 | tr -d '\042\047'); \
+	test -n "$$network" || { echo "WHITECHAIN_NETWORK is not set in .env" >&2; exit 1; }; \
+	[[ "$$network" =~ ^[A-Za-z0-9._-]+$$ && "$$network" != . && "$$network" != .. ]] || \
+		{ echo "Invalid WHITECHAIN_NETWORK '$$network' in .env: use only letters, digits, '.', '-' and '_'" >&2; exit 1; }; \
+	test -f "artifacts/$$network/genesis.json" || { echo "Missing artifacts/$$network/genesis.json" >&2; exit 1; }; \
+	test -f "artifacts/$$network/rollup.json"  || { echo "Missing artifacts/$$network/rollup.json"  >&2; exit 1; }
+
+check-profile:
+	@for p in $(VALID_PROFILES); do [ "$$PROFILE" = "$$p" ] && exit 0; done; \
+	echo "Invalid PROFILE '$$PROFILE'. Use one of: $(VALID_PROFILES)" >&2; \
+	exit 1
 
 # ----------------------------
 # Generic targets (PROFILE-driven)
 # ----------------------------
-up: check-env ensure-jwt
-	@$(COMPOSE) --profile $(PROFILE) up -d
+up: check-profile check-env ensure-jwt
+	@$(COMPOSE) --profile "$$PROFILE" up -d
 
-down:
-	@$(COMPOSE) --profile $(PROFILE) down
+down: check-profile
+	@$(COMPOSE) --profile "$$PROFILE" down
 
 reup: down up
 
-ps:
-	@$(COMPOSE) --profile $(PROFILE) ps
+ps: check-profile
+	@$(COMPOSE) --profile "$$PROFILE" ps
 
-logs:
-	@$(COMPOSE) --profile $(PROFILE) logs -f --tail=200
+logs: check-profile
+	@$(COMPOSE) --profile "$$PROFILE" logs -f --tail=200
 
-config:
-	@$(COMPOSE) --profile $(PROFILE) config
+config: check-profile
+	@$(COMPOSE) --profile "$$PROFILE" config
 
 # ----------------------------
 # FULL SNAP NODE (pruned, execution-layer / snap sync)
