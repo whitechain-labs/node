@@ -1,6 +1,7 @@
 name: whitechain-public-rpc
 
 x-op-reth-common: &op-reth-common
+  platform: linux/amd64
   image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:v2.3.3}
   restart: unless-stopped
   extra_hosts:
@@ -15,6 +16,7 @@ x-op-reth-common: &op-reth-common
     start_period: 60s
 
 x-op-node-common: &op-node-common
+  platform: linux/amd64
   image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:v1.19.3}
   restart: unless-stopped
   extra_hosts:
@@ -28,7 +30,6 @@ services:
   # Fastest and simplest bootstrap. Pruned execution state. op-node runs
   # --syncmode=execution-layer and op-reth snap-syncs the state from a
   # trusted reth peer over EL P2P (WHITECHAIN_RETH_TRUSTED_PEERS).
-  # No DB snapshot needed.
   # ----------------------------
   full-snap-node-op-reth:
     <<: *op-reth-common
@@ -119,8 +120,8 @@ services:
   # ----------------------------
   # FULL NODE (pruned, consensus-layer sync)
   # Pruned execution state. op-node derives the chain from L1 and
-  # re-executes every block (no snap sync). Restore a DB snapshot to
-  # skip the long initial sync.
+  # re-executes every block from genesis (no snap sync), so the initial
+  # sync is long on a chain with history behind it.
   # ----------------------------
   full-node-op-reth:
     <<: *op-reth-common
@@ -210,7 +211,7 @@ services:
   # Full historical state. Serves the same conservative namespaces as the other
   # profiles by default; debug/trace/txpool/reth are an explicit opt-in through
   # HTTP_API / WS_API in .env. op-node re-executes every block from L1 (no snap
-  # sync). Restore a DB snapshot to skip the long initial sync.
+  # sync), which makes the initial sync of this profile the longest.
   # ----------------------------
   archive-node-op-reth:
     <<: *op-reth-common
