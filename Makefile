@@ -57,8 +57,40 @@ check-env:
 	test -n "$$network" || { echo "WHITECHAIN_NETWORK is not set in .env" >&2; exit 1; }; \
 	for n in $(VALID_NETWORKS); do [ "$$network" = "$$n" ] && ok=1; done; \
 	test -n "$$ok" || { echo "Invalid WHITECHAIN_NETWORK '$$network' in .env. Use one of: $(VALID_NETWORKS)" >&2; exit 1; }; \
-	test -f "artifacts/$$network/genesis.json" || { echo "Missing artifacts/$$network/genesis.json" >&2; exit 1; }; \
-	test -f "artifacts/$$network/rollup.json"  || { echo "Missing artifacts/$$network/rollup.json"  >&2; exit 1; }
+	genesis="artifacts/$$network/genesis.json"; \
+	rollup="artifacts/$$network/rollup.json"; \
+	fix="re-copy it from the $$network/ directory of https://github.com/whitechain-labs/whitechain-bootstrap and verify its SHA-256"; \
+	test -f "$$genesis" || { echo "Missing $$genesis – $$fix" >&2; exit 1; }; \
+	test -f "$$rollup"  || { echo "Missing $$rollup – $$fix" >&2; exit 1; }; \
+	command -v jq >/dev/null 2>&1 || { echo "jq not found: it is required to cross-check genesis.json against rollup.json" >&2; exit 1; }; \
+	genesis_out=$$(jq -r '[(.config.chainId // ""), (.timestamp // "")] | @tsv' "$$genesis" 2>/dev/null); \
+	lines=$$(printf '%s\n' "$$genesis_out" | grep -c .); \
+	test "$$lines" = "1" || { echo "$$genesis is not a single valid JSON document (parsed $$lines) – $$fix" >&2; exit 1; }; \
+	rollup_out=$$(jq -r '[(.l2_chain_id // ""), (.genesis.l2_time // ""), (.l1_chain_id // "")] | @tsv' "$$rollup" 2>/dev/null); \
+	lines=$$(printf '%s\n' "$$rollup_out" | grep -c .); \
+	test "$$lines" = "1" || { echo "$$rollup is not a single valid JSON document (parsed $$lines) – $$fix" >&2; exit 1; }; \
+	genesis_chain_id=$$(printf '%s' "$$genesis_out" | cut -f1); \
+	genesis_time=$$(printf '%s' "$$genesis_out" | cut -f2); \
+	rollup_chain_id=$$(printf '%s' "$$rollup_out" | cut -f1); \
+	rollup_time=$$(printf '%s' "$$rollup_out" | cut -f2); \
+	rollup_l1_chain_id=$$(printf '%s' "$$rollup_out" | cut -f3); \
+	case "$$genesis_chain_id" in ''|*[!0-9]*) echo "$$genesis: .config.chainId must be a decimal number, got '$$genesis_chain_id' – $$fix" >&2; exit 1 ;; esac; \
+	case "$$rollup_chain_id"  in ''|*[!0-9]*) echo "$$rollup: .l2_chain_id must be a decimal number, got '$$rollup_chain_id' – $$fix" >&2; exit 1 ;; esac; \
+	[ "$$genesis_chain_id" = "$$rollup_chain_id" ] || \
+		{ echo "L2 chain ID mismatch: genesis=$$genesis_chain_id rollup=$$rollup_chain_id – the two files describe different chains" >&2; exit 1; }; \
+	case "$$genesis_time" in \
+		0[xX]*) hex=$${genesis_time#0[xX]}; \
+			case "$$hex" in ''|*[!0-9a-fA-F]*) echo "$$genesis: .timestamp is not a valid hex number, got '$$genesis_time' – $$fix" >&2; exit 1 ;; esac; \
+			genesis_time=$$((16#$$hex)) ;; \
+		''|*[!0-9]*) echo "$$genesis: .timestamp must be a hex or decimal number, got '$$genesis_time' – $$fix" >&2; exit 1 ;; \
+	esac; \
+	case "$$rollup_time" in ''|*[!0-9]*) echo "$$rollup: .genesis.l2_time must be a decimal number, got '$$rollup_time' – $$fix" >&2; exit 1 ;; esac; \
+	[ "$$genesis_time" = "$$rollup_time" ] || \
+		{ echo "L2 genesis timestamp mismatch: genesis=$$genesis_time rollup=$$rollup_time – the two files are from different deployments of the same chain" >&2; exit 1; }; \
+	case "$$rollup_l1_chain_id" in ''|*[!0-9]*) echo "$$rollup: .l1_chain_id must be a decimal number, got '$$rollup_l1_chain_id' – $$fix" >&2; exit 1 ;; esac; \
+	case "$$network" in mainnet) expected_l1=1 ;; testnet) expected_l1=11155111 ;; *) expected_l1="$$rollup_l1_chain_id" ;; esac; \
+	[ "$$rollup_l1_chain_id" = "$$expected_l1" ] || \
+		{ echo "L1 chain ID mismatch for WHITECHAIN_NETWORK=$$network: rollup.json settles on L1 $$rollup_l1_chain_id, expected $$expected_l1 (mainnet: Ethereum mainnet 1, testnet: Sepolia 11155111)" >&2; exit 1; }
 
 check-network:
 	@for n in $(VALID_NETWORKS); do [ "$$WHITECHAIN_NETWORK" = "$$n" ] && exit 0; done; \

@@ -48,7 +48,7 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
 - The published `genesis.json` and `rollup.json` for the chosen network, from [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap), placed under `artifacts/<network>/`
 - A reachable public IP for the node (`PUBLIC_IP`), used for P2P advertisement
 - For `full-snap-node`: a trusted reth enode to snap-sync from (`WHITECHAIN_RETH_TRUSTED_PEERS`)
-- `make`, `git`, `openssl`, `curl`
+- `make`, `git`, `openssl`, `curl`, `jq` (`jq` is used to cross-check the artifacts before start)
 
 | Whitechain network | L1 chain |
 | --- | --- |
@@ -86,7 +86,7 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
    artifacts/testnet/rollup.json
    ```
 
-   The folder name must match `WHITECHAIN_NETWORK` in `.env` (`mainnet` or `testnet`). Compare the hashes yourself – this repository deliberately keeps no copy of the artifacts and no checksum file of its own, so there is a single source of truth to check against.
+   The folder name must match `WHITECHAIN_NETWORK` in `.env` (`mainnet` or `testnet`). Compare the hashes yourself – this repository deliberately keeps no copy of the artifacts and no checksum file of its own, so there is a single source of truth to check against. `make up` additionally cross-checks the pair for consistency, see [Artifact validation](#artifact-validation).
 
 2. Create your `.env`:
 
@@ -106,7 +106,7 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
    make logs-full-snap-node
    ```
 
-   `make up` validates `.env` and the artifacts, generates `keys/<profile>/jwt.txt` if missing, then runs `docker compose --profile <profile> up -d`.
+   `make up` validates `.env`, cross-checks the artifacts (see [Artifact validation](#artifact-validation)), generates `keys/<profile>/jwt.txt` if missing, then runs `docker compose --profile <profile> up -d`.
 
 4. Confirm the node responds (use the profile's HTTP port):
 
@@ -200,6 +200,18 @@ keys/
 ```
 
 Each profile also owns its Engine API secret in `keys/<profile>/jwt.txt` and its own Compose network (`public_rpc_full_snap`, `public_rpc_full`, `public_rpc_archive`), so two profiles running at the same time share neither a credential nor a network path. `make up` generates the secret for the selected profile if it is missing.
+
+## Artifact validation
+
+`make check-env` (a prerequisite of `make up`) cross-checks `artifacts/<network>/genesis.json` against `artifacts/<network>/rollup.json` with `jq` and refuses to start on any of these:
+
+| Check | Fails when |
+| --- | --- |
+| `genesis.config.chainId` = `rollup.l2_chain_id` | the two files describe different chains, e.g. a `genesis.json` from one network next to a `rollup.json` from another |
+| `genesis.timestamp` = `rollup.genesis.l2_time` | the files come from different deployments of the same chain ID |
+| `rollup.l1_chain_id` matches the network | the whole pair belongs to the other network – `mainnet` must settle on Ethereum mainnet (`1`), `testnet` on Sepolia (`11155111`) |
+
+This is **configuration consistency, not authenticity**. All three checks still pass on a pair of files that was tampered with consistently. Authenticity comes from the source: the [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap) repository and the SHA-256 hashes published with it – compare them as shown in [Quick Start](#quick-start) step 1.
 
 ## Operations
 

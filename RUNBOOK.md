@@ -147,7 +147,7 @@ Public endpoints:
    public-rpc-node/artifacts/testnet/rollup.json
    ```
 
-   For the mainnet use `artifacts/mainnet/`. The folder name must match `WHITECHAIN_NETWORK` in `.env`. Do not skip the hash comparison: `genesis.json` defines the chain your node considers canonical, and `rollup.json` defines how it derives it – a wrong or tampered file puts the node on a different chain.
+   For the mainnet use `artifacts/mainnet/`. The folder name must match `WHITECHAIN_NETWORK` in `.env`. Do not skip the hash comparison: `genesis.json` defines the chain your node considers canonical, and `rollup.json` defines how it derives it – a wrong or tampered file puts the node on a different chain. `make up` also cross-checks the two files against each other, but that catches mismatched files, not tampered ones – see [Artifact validation](#artifact-validation).
 
 3. Create your `.env`:
 
@@ -187,7 +187,7 @@ Public endpoints:
 
    `make up` will:
 
-   1. Validate that `.env` and `artifacts/<network>/{genesis,rollup}.json` exist.
+   1. Validate `.env`, and validate that `artifacts/<network>/{genesis,rollup}.json` exist and are consistent with each other – see [Artifact validation](#artifact-validation).
    2. Generate `keys/<profile>/jwt.txt` if missing.
    3. Run `docker compose --profile <profile> up -d`.
 
@@ -199,6 +199,18 @@ Public endpoints:
    ```
 
 > **Warning:** For `full-node` and `archive-node`, initial sync from genesis re-executes every transaction and can take from minutes on a fresh testnet to many hours on a long-running chain. `full-snap-node` bootstraps fast from its trusted peer instead.
+
+## Artifact validation
+
+`make check-env`, a prerequisite of `make up`, does more than check that the files exist. It cross-checks `artifacts/<network>/genesis.json` against `artifacts/<network>/rollup.json` with `jq` and refuses to start the node on any mismatch:
+
+| Check | Fails when |
+| --- | --- |
+| `genesis.config.chainId` = `rollup.l2_chain_id` | the two files describe different chains, e.g. a `genesis.json` from one network next to a `rollup.json` from another |
+| `genesis.timestamp` = `rollup.genesis.l2_time` | the files come from different deployments of the same chain ID |
+| `rollup.l1_chain_id` matches the network | the whole pair belongs to the other network – `mainnet` must settle on Ethereum mainnet (`1`), `testnet` on Sepolia (`11155111`) |
+
+These are **consistency** checks on your configuration, not authenticity checks. A pair of files tampered with consistently passes all three. Authenticity comes from the source instead: take the files from [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap) and compare their SHA-256 with the hashes published there, as in [Running a Node](#running-a-node) step 2.
 
 ## Creating a Backup
 
@@ -373,6 +385,14 @@ Copy from `.env.mainnet.example` (or `.env.testnet.example`) and fill the values
 ### `Missing artifacts/<network>/genesis.json`
 
 The artifacts are not part of this repository. Copy `genesis.json` and `rollup.json` for the chosen network from [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap) into `artifacts/<network>/`, verifying their SHA-256 against the hashes published there – see [Running a Node](#running-a-node) step 2. The folder name has to match `WHITECHAIN_NETWORK` in `.env`.
+
+### `L2 chain ID mismatch` / `L2 genesis timestamp mismatch` / `L1 chain ID mismatch`
+
+`genesis.json` and `rollup.json` in `artifacts/<network>/` do not belong together, or the pair does not belong to the network selected by `WHITECHAIN_NETWORK`. Re-copy both files from the same network directory of [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap) and re-check their SHA-256 – see [Artifact validation](#artifact-validation).
+
+### `jq not found`
+
+`make check-env` uses `jq` to cross-check the artifacts. Install it (`apt install jq`, `brew install jq`) and run again.
 
 ### `set PUBLIC_IP in .env`
 
