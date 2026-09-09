@@ -1,5 +1,6 @@
 SHELL := /bin/bash
 WHITECHAIN_NETWORK ?= testnet
+VALID_NETWORKS := mainnet testnet
 JWT_FILE ?= keys/jwt.txt
 COMPOSE  ?= docker compose
 
@@ -10,7 +11,7 @@ VALID_PROFILES := full-snap-node full-node archive-node
 export WHITECHAIN_NETWORK
 export PROFILE
 
-.PHONY: help ensure-jwt check-env check-profile \
+.PHONY: help ensure-jwt check-env check-profile check-network \
         up down reup ps logs config \
         up-full-snap-node down-full-snap-node reup-full-snap-node ps-full-snap-node logs-full-snap-node \
         up-full-node down-full-node reup-full-node ps-full-node logs-full-node \
@@ -54,10 +55,15 @@ check-env:
 	@test -f .env || { echo "Missing .env. Copy .env.mainnet.example (or .env.testnet.example) to .env and fill values." >&2; exit 1; }
 	@network=$$(sed -n 's/^[[:space:]]*WHITECHAIN_NETWORK[[:space:]]*=[[:space:]]*\([^[:space:]#]*\).*$$/\1/p' .env | tail -n 1 | tr -d '\042\047'); \
 	test -n "$$network" || { echo "WHITECHAIN_NETWORK is not set in .env" >&2; exit 1; }; \
-	[[ "$$network" =~ ^[A-Za-z0-9._-]+$$ && "$$network" != . && "$$network" != .. ]] || \
-		{ echo "Invalid WHITECHAIN_NETWORK '$$network' in .env: use only letters, digits, '.', '-' and '_'" >&2; exit 1; }; \
+	for n in $(VALID_NETWORKS); do [ "$$network" = "$$n" ] && ok=1; done; \
+	test -n "$$ok" || { echo "Invalid WHITECHAIN_NETWORK '$$network' in .env. Use one of: $(VALID_NETWORKS)" >&2; exit 1; }; \
 	test -f "artifacts/$$network/genesis.json" || { echo "Missing artifacts/$$network/genesis.json" >&2; exit 1; }; \
 	test -f "artifacts/$$network/rollup.json"  || { echo "Missing artifacts/$$network/rollup.json"  >&2; exit 1; }
+
+check-network:
+	@for n in $(VALID_NETWORKS); do [ "$$WHITECHAIN_NETWORK" = "$$n" ] && exit 0; done; \
+	echo "Invalid WHITECHAIN_NETWORK '$$WHITECHAIN_NETWORK'. Use one of: $(VALID_NETWORKS)" >&2; \
+	exit 1
 
 check-profile:
 	@for p in $(VALID_PROFILES); do [ "$$PROFILE" = "$$p" ] && exit 0; done; \
@@ -67,21 +73,21 @@ check-profile:
 # ----------------------------
 # Generic targets (PROFILE-driven)
 # ----------------------------
-up: check-profile check-env ensure-jwt
+up: check-profile check-network check-env ensure-jwt
 	@$(COMPOSE) --profile "$$PROFILE" up -d
 
-down: check-profile
+down: check-profile check-network
 	@$(COMPOSE) --profile "$$PROFILE" down
 
 reup: down up
 
-ps: check-profile
+ps: check-profile check-network
 	@$(COMPOSE) --profile "$$PROFILE" ps
 
-logs: check-profile
+logs: check-profile check-network
 	@$(COMPOSE) --profile "$$PROFILE" logs -f --tail=200
 
-config: check-profile
+config: check-profile check-network
 	@$(COMPOSE) --profile "$$PROFILE" config
 
 # ----------------------------
