@@ -3,8 +3,6 @@ name: whitechain-public-rpc
 x-op-reth-common: &op-reth-common
   image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:v2.3.3}
   restart: unless-stopped
-  networks:
-    - public_rpc
   extra_hosts:
     - "host.docker.internal:host-gateway"
   env_file:
@@ -19,8 +17,6 @@ x-op-reth-common: &op-reth-common
 x-op-node-common: &op-node-common
   image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:v1.19.3}
   restart: unless-stopped
-  networks:
-    - public_rpc
   extra_hosts:
     - "host.docker.internal:host-gateway"
   env_file:
@@ -38,6 +34,8 @@ services:
     <<: *op-reth-common
     profiles: ["full-snap-node"]
     container_name: whitechain-full-snap-node-op-reth
+    networks:
+      - public_rpc_full_snap
     ports:
       - "${HOST_HTTP_PORT:-8545}:8545"
       - "${HOST_WS_PORT:-8546}:8546"
@@ -46,7 +44,7 @@ services:
     volumes:
       - ./data/full-snap-node/op-reth:/db
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
-      - ./keys/jwt.txt:/config/jwt.txt:ro
+      - ./keys/full-snap-node/jwt.txt:/config/jwt.txt:ro
     command: >
       node
       --chain=/config/genesis.json
@@ -77,6 +75,8 @@ services:
     <<: *op-node-common
     profiles: ["full-snap-node"]
     container_name: whitechain-full-snap-node-op-node
+    networks:
+      - public_rpc_full_snap
     depends_on:
       full-snap-node-op-reth:
         condition: service_healthy
@@ -87,7 +87,7 @@ services:
       - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
     volumes:
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
-      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./keys/full-snap-node/jwt.txt:/jwt.txt:ro
       - ./data/full-snap-node/op-node:/data
     command: >
       op-node
@@ -126,6 +126,8 @@ services:
     <<: *op-reth-common
     profiles: ["full-node"]
     container_name: whitechain-full-node-op-reth
+    networks:
+      - public_rpc_full
     ports:
       - "${HOST_HTTP_PORT:-8545}:8545"
       - "${HOST_WS_PORT:-8546}:8546"
@@ -134,7 +136,7 @@ services:
     volumes:
       - ./data/full-node/op-reth:/db
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
-      - ./keys/jwt.txt:/config/jwt.txt:ro
+      - ./keys/full-node/jwt.txt:/config/jwt.txt:ro
     command: >
       node
       --chain=/config/genesis.json
@@ -163,6 +165,8 @@ services:
     <<: *op-node-common
     profiles: ["full-node"]
     container_name: whitechain-full-node-op-node
+    networks:
+      - public_rpc_full
     depends_on:
       full-node-op-reth:
         condition: service_healthy
@@ -173,7 +177,7 @@ services:
       - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
     volumes:
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
-      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./keys/full-node/jwt.txt:/jwt.txt:ro
       - ./data/full-node/op-node:/data
     command: >
       op-node
@@ -211,6 +215,8 @@ services:
     <<: *op-reth-common
     profiles: ["archive-node"]
     container_name: whitechain-archive-node-op-reth
+    networks:
+      - public_rpc_archive
     ports:
       - "${HOST_HTTP_PORT:-8545}:8545"
       - "${HOST_WS_PORT:-8546}:8546"
@@ -219,7 +225,7 @@ services:
     volumes:
       - ./data/archive-node/op-reth:/db
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
-      - ./keys/jwt.txt:/config/jwt.txt:ro
+      - ./keys/archive-node/jwt.txt:/config/jwt.txt:ro
     command: >
       node
       --chain=/config/genesis.json
@@ -251,6 +257,8 @@ services:
     <<: *op-node-common
     profiles: ["archive-node"]
     container_name: whitechain-archive-node-op-node
+    networks:
+      - public_rpc_archive
     depends_on:
       archive-node-op-reth:
         condition: service_healthy
@@ -261,7 +269,7 @@ services:
       - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
     volumes:
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
-      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./keys/archive-node/jwt.txt:/jwt.txt:ro
       - ./data/archive-node/op-node:/data
     command: >
       op-node
@@ -290,5 +298,9 @@ services:
       --metrics.port=7300
 
 networks:
-  public_rpc:
+  public_rpc_full_snap:
+    driver: bridge
+  public_rpc_full:
+    driver: bridge
+  public_rpc_archive:
     driver: bridge

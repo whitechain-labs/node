@@ -135,7 +135,7 @@ Notes:
    make logs-full-snap-node
    ```
 
-   `make up` validates `.env` and the artifacts, generates `keys/jwt.txt` if missing, then runs `docker compose --profile <profile> up -d`.
+   `make up` validates `.env` and the artifacts, generates `keys/<profile>/jwt.txt` if missing, then runs `docker compose --profile <profile> up -d`.
 
 5. Confirm the node responds (use the profile's HTTP port):
 
@@ -218,9 +218,15 @@ data/
   archive-node/
     op-reth/
     op-node/
+keys/
+  full-snap-node/jwt.txt
+  full-node/jwt.txt
+  archive-node/jwt.txt
 ```
 
 Snapshots are restored into `data/<profile>/op-reth/`.
+
+Each profile also owns its Engine API secret in `keys/<profile>/jwt.txt` and its own Compose network (`public_rpc_full_snap`, `public_rpc_full`, `public_rpc_archive`), so two profiles running at the same time share neither a credential nor a network path. `make up` generates the secret for the selected profile if it is missing.
 
 ## Operations
 
@@ -242,7 +248,7 @@ make up-full-snap-node   make down-full-snap-node   make reup-full-snap-node   m
 make up-full-node        make down-full-node        make reup-full-node        make ps-full-node        make logs-full-node
 make up-archive-node     make down-archive-node     make reup-archive-node     make ps-archive-node     make logs-archive-node
 
-make ensure-jwt    # generate keys/jwt.txt if missing
+make ensure-jwt    # generate keys/<profile>/jwt.txt if missing
 make help          # list all targets
 ```
 
@@ -296,8 +302,8 @@ If the upgrade includes a new hardfork, replace `artifacts/<network>/rollup.json
 ## Notes
 
 - This stack holds no project-side private keys. The sequencer, batcher, proposer, and challenger keys stay on the Whitechain side. You operate a follow-only node.
-- The Engine API on `8551` is bound only to the internal compose network. Do not publish it.
+- The Engine API on `8551` is bound only to the profile's own compose network. Do not publish it.
 - op-node RPC (`9545`) is bound to loopback only and does not enable the `admin` namespace. op-reth exposes no `admin` namespace. The node therefore exposes no administrative or state-mutating control surface to the network.
 - On `full-snap-node` the EL P2P port `30303` is published on all interfaces (TCP and UDP) – op-reth needs it to snap-sync and to peer over devp2p. It carries no RPC and no administrative methods. `full-node` and `archive-node` do not publish it.
-- `keys/jwt.txt` is generated locally and used only between op-node and op-reth in this stack. It does not need to match anything outside.
+- `keys/<profile>/jwt.txt` is generated locally and used only between the op-node and op-reth of that profile. Each profile has its own secret and its own compose network, so one profile's Engine API credential never grants access to another's. It does not need to match anything outside. If you upgraded from a version that used a single `keys/jwt.txt`, the next `make up` generates the per-profile secret and recreates both containers with it; the old file is unused and can be deleted.
 - To resync a profile from scratch: `make down PROFILE=<p>`, then `rm -rf data/<p>/op-reth data/<p>/op-node`, then `make up PROFILE=<p>`. For `full-node`/`archive-node` prefer restoring a snapshot over a full genesis resync.

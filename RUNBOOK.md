@@ -89,7 +89,7 @@ Only one profile runs at a time, so all profiles share the same host ports. Each
 | op-node P2P (TCP+UDP) | `9222` | `HOST_OP_NODE_P2P_PORT` |
 | EL P2P (TCP+UDP) | `30303` – published on `full-snap-node`, not published on `full-node` / `archive-node` | `HOST_EL_P2P_PORT` |
 
-The Engine API (`8551`) stays on the internal compose network and is not published. op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host but never from the network – and the `admin` namespace is not enabled, so it serves only the read-only `optimism`, `opp2p`, and `superroot` namespaces.
+The Engine API (`8551`) stays on the profile's own compose network and is not published. op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host but never from the network – and the `admin` namespace is not enabled, so it serves only the read-only `optimism`, `opp2p`, and `superroot` namespaces.
 
 The EL P2P port (`30303`) is published **only by the `full-snap-node` profile** – the recommended default – on all interfaces (`0.0.0.0`), TCP and UDP. That profile bootstraps over EL P2P: op-reth snap-syncs the state from the trusted reth peer and uses reth discovery (UDP `30303`) and devp2p (TCP `30303`) for it, so the port is reachable for inbound EL peers as well. The upstream OP Stack compose example publishes the same port the same way. It carries devp2p traffic only – no RPC, no `admin` surface – but if you do not want inbound EL peering, remap it with `HOST_EL_P2P_PORT` or block it at the firewall. For `full-node` and `archive-node` the mapping is commented out in `docker-compose.yml` and the port is not published: both sync in consensus-layer mode from L1 and need no EL peering.
 
@@ -175,7 +175,7 @@ Public endpoints and (optionally) a snapshot:
    `make up` will:
 
    1. Validate that `.env` and `artifacts/<network>/{genesis,rollup}.json` exist.
-   2. Generate `keys/jwt.txt` if missing.
+   2. Generate `keys/<profile>/jwt.txt` if missing.
    3. Run `docker compose --profile <profile> up -d`.
 
 6. Confirm you get a response from your node (use the profile's HTTP port):
@@ -312,7 +312,7 @@ make logs PROFILE=archive-node   # tail logs
 make config PROFILE=archive-node # render merged compose config
 ```
 
-Per-profile shortcuts exist for each: `make up-full-snap-node`, `make logs-full-node`, `make reup-archive-node`, etc. `make ensure-jwt` generates `keys/jwt.txt` manually; `make help` lists everything.
+Per-profile shortcuts exist for each: `make up-full-snap-node`, `make logs-full-node`, `make reup-archive-node`, etc. `make ensure-jwt` generates `keys/<profile>/jwt.txt` manually; `make help` lists everything.
 
 To wipe local state and resync a profile from genesis:
 
@@ -369,11 +369,11 @@ If the upgrade includes a new hardfork, replace `artifacts/<network>/rollup.json
 
 ## Security Notes
 
-* The Engine API on port `8551` is bound only to the internal compose network and is not exposed to the host. Do not publish it.
+* The Engine API on port `8551` is bound only to the profile's own compose network (`public_rpc_full_snap`, `public_rpc_full`, or `public_rpc_archive`) and is not exposed to the host. Do not publish it.
 * op-node RPC on port `9545` is bound to loopback (`127.0.0.1`) only, so it is reachable from the host but not from the network. The `admin` namespace is not enabled, so it serves only read-only rollup, P2P, and super-root status methods (`optimism`, `opp2p`, `superroot`).
 * op-reth exposes no `admin` namespace on any profile. The public JSON-RPC (`8545`) and WebSocket (`8546`) ports serve only read-only namespaces (`eth`, `net`, `web3`, `rpc`; archive adds `debug`, `trace`, `txpool`, `reth`). The node exposes no state-mutating or administrative control surface.
 * On `full-snap-node` the EL P2P port `30303` is published on all interfaces (TCP and UDP) – op-reth needs it to snap-sync and to peer over devp2p. It carries no RPC and no administrative methods. `full-node` and `archive-node` do not publish it.
-* `keys/jwt.txt` is local to your machine and is used only between `op-node` and `op-reth` in this stack. It does not need to match anything outside.
+* `keys/<profile>/jwt.txt` is local to your machine and is used only between the `op-node` and `op-reth` of that profile. Every profile has its own secret and its own compose network, so containers of one profile can neither reach nor authenticate against another profile's Engine API. It does not need to match anything outside. If you upgraded from a version with a single `keys/jwt.txt`, the next `make up` generates the per-profile secret and recreates both containers with it; the old file is unused and can be deleted.
 * The node holds no project-side private keys. Operate it as a read and forward node.
 * Restrict inbound access to the JSON-RPC ports you choose to expose – put them behind a firewall, reverse proxy, or rate limiter before serving untrusted clients.
 

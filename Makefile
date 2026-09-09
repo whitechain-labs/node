@@ -1,7 +1,7 @@
 SHELL := /bin/bash
 WHITECHAIN_NETWORK ?= testnet
 VALID_NETWORKS := mainnet testnet
-JWT_FILE ?= keys/jwt.txt
+JWT_FILE ?= keys/$(PROFILE)/jwt.txt
 COMPOSE  ?= docker compose
 
 # Node profile to operate on: full-snap-node | full-node | archive-node
@@ -40,8 +40,8 @@ help:
 	@echo ""
 	@echo "  make ensure-jwt       Generate keys/jwt.txt if missing"
 
-ensure-jwt:
-	@mkdir -p keys
+ensure-jwt: check-profile
+	@mkdir -p "$$(dirname "$(JWT_FILE)")"
 	@if [ ! -s "$(JWT_FILE)" ]; then \
 		openssl rand -hex 32 > "$(JWT_FILE)"; \
 		chmod 600 "$(JWT_FILE)"; \
