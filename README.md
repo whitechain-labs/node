@@ -194,12 +194,13 @@ Only one profile runs at a time, so all profiles share the same host ports. Each
 | WebSocket RPC | `8546` | `HOST_WS_PORT` |
 | op-node RPC | `9545` (loopback `127.0.0.1` only) | `HOST_OP_NODE_RPC_PORT` |
 | op-node P2P (TCP+UDP) | `9222` | `HOST_OP_NODE_P2P_PORT` |
-| EL P2P (TCP+UDP) | `30303` (disabled by default) | `HOST_EL_P2P_PORT` |
+| EL P2P (TCP+UDP) | `30303` – published on `full-snap-node`, not published on `full-node` / `archive-node` | `HOST_EL_P2P_PORT` |
 
 - The Engine API (`8551`) stays inside the compose network and is not published to the host.
 - op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host, never from the network. The `admin` namespace is not enabled, so it serves only the read-only `optimism`, `opp2p`, and `superroot` namespaces.
-- The EL P2P port (`30303`) is **not** published by default – snap sync only needs outbound connectivity to the trusted peer. Its host mapping is commented out in `docker-compose.yml`; uncomment it only if you want inbound EL peering.
-- Only the public JSON-RPC (`8545`) and WebSocket (`8546`) ports are network-facing, and they expose only read-only namespaces. Still, put them behind a firewall, reverse proxy, or rate limiter before serving untrusted clients.
+- The EL P2P port (`30303`) is published **only by the `full-snap-node` profile** – the recommended default – on all interfaces (`0.0.0.0`), TCP and UDP. That profile bootstraps over EL P2P: op-reth snap-syncs the state from the trusted reth peer and uses reth discovery (UDP `30303`) and devp2p (TCP `30303`) for it, so the port is reachable for inbound EL peers as well. The upstream OP Stack compose example publishes the same port the same way. It carries devp2p traffic only – no RPC, no `admin` surface – but if you do not want inbound EL peering, remap it with `HOST_EL_P2P_PORT` or block it at the firewall.
+- For `full-node` and `archive-node` the `30303` mapping is commented out in `docker-compose.yml` and the port is **not** published: both sync in consensus-layer mode, deriving the chain from L1, and need no EL peering. Uncomment it only if you want inbound EL peers on those profiles.
+- Of the RPC surfaces, only the public JSON-RPC (`8545`) and WebSocket (`8546`) ports are network-facing, and they expose only read-only namespaces. Still, put them behind a firewall, reverse proxy, or rate limiter before serving untrusted clients.
 - Run only one profile at a time – they all bind the same host ports. To run two side by side on one host, override one profile's ports in `.env`.
 
 ## Data layout
@@ -297,5 +298,6 @@ If the upgrade includes a new hardfork, replace `artifacts/<network>/rollup.json
 - This stack holds no project-side private keys. The sequencer, batcher, proposer, and challenger keys stay on the Whitechain side. You operate a follow-only node.
 - The Engine API on `8551` is bound only to the internal compose network. Do not publish it.
 - op-node RPC (`9545`) is bound to loopback only and does not enable the `admin` namespace. op-reth exposes no `admin` namespace. The node therefore exposes no administrative or state-mutating control surface to the network.
+- On `full-snap-node` the EL P2P port `30303` is published on all interfaces (TCP and UDP) – op-reth needs it to snap-sync and to peer over devp2p. It carries no RPC and no administrative methods. `full-node` and `archive-node` do not publish it.
 - `keys/jwt.txt` is generated locally and used only between op-node and op-reth in this stack. It does not need to match anything outside.
 - To resync a profile from scratch: `make down PROFILE=<p>`, then `rm -rf data/<p>/op-reth data/<p>/op-node`, then `make up PROFILE=<p>`. For `full-node`/`archive-node` prefer restoring a snapshot over a full genesis resync.
