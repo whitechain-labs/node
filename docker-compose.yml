@@ -53,11 +53,11 @@ services:
       --http
       --http.addr=0.0.0.0
       --http.port=8545
-      --http.api=eth,net,web3,rpc
+      --http.api=${HTTP_API:-eth,net,web3,rpc}
       --ws
       --ws.addr=0.0.0.0
       --ws.port=8546
-      --ws.api=eth,net,web3,rpc
+      --ws.api=${WS_API:-eth,net,web3,rpc}
       --authrpc.addr=0.0.0.0
       --authrpc.port=8551
       --authrpc.jwtsecret=/config/jwt.txt
@@ -145,11 +145,11 @@ services:
       --http
       --http.addr=0.0.0.0
       --http.port=8545
-      --http.api=eth,net,web3,rpc
+      --http.api=${HTTP_API:-eth,net,web3,rpc}
       --ws
       --ws.addr=0.0.0.0
       --ws.port=8546
-      --ws.api=eth,net,web3,rpc
+      --ws.api=${WS_API:-eth,net,web3,rpc}
       --authrpc.addr=0.0.0.0
       --authrpc.port=8551
       --authrpc.jwtsecret=/config/jwt.txt
@@ -207,9 +207,10 @@ services:
 
   # ----------------------------
   # ARCHIVE NODE (full history, consensus-layer sync)
-  # Full historical state + debug/trace/txpool/reth namespaces. op-node
-  # re-executes every block from L1 (no snap sync). Restore a DB snapshot
-  # to skip the long initial sync.
+  # Full historical state. Serves the same conservative namespaces as the other
+  # profiles by default; debug/trace/txpool/reth are an explicit opt-in through
+  # HTTP_API / WS_API in .env. op-node re-executes every block from L1 (no snap
+  # sync). Restore a DB snapshot to skip the long initial sync.
   # ----------------------------
   archive-node-op-reth:
     <<: *op-reth-common
@@ -233,11 +234,11 @@ services:
       --http
       --http.addr=0.0.0.0
       --http.port=8545
-      --http.api=eth,net,web3,rpc,debug,trace,txpool,reth
+      --http.api=${HTTP_API:-eth,net,web3,rpc}
       --ws
       --ws.addr=0.0.0.0
       --ws.port=8546
-      --ws.api=eth,net,web3,rpc
+      --ws.api=${WS_API:-eth,net,web3,rpc}
       --authrpc.addr=0.0.0.0
       --authrpc.port=8551
       --authrpc.jwtsecret=/config/jwt.txt

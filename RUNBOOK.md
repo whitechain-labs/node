@@ -62,7 +62,7 @@ The stack ships three profiles. Pick one with `PROFILE=<profile>` or a per-profi
 
 * **full-snap-node** – the recommended default and fastest, simplest way to bring up a node. Pruned execution state and the basic RPC namespaces `eth,net,web3,rpc`. Bootstraps by snap-syncing from a trusted reth peer (`WHITECHAIN_RETH_TRUSTED_PEERS`) instead of re-executing, so it needs no snapshot. Use it when you have a reachable seed reth enode.
 * **full-node** – same pruned state and namespaces as `full-snap-node`, but syncs in consensus-layer mode by re-executing the chain from L1. Use it when you have no trusted reth peer to snap-sync from. Restore a snapshot to avoid a long initial sync.
-* **archive-node** – keeps full historical state and adds the `debug`, `trace`, `txpool`, `reth` namespaces plus higher RPC limits. Required for historical `eth_call`, `debug_traceTransaction`, and log-heavy indexing. Archive cannot snap-sync, so it always syncs by re-executing from L1 – restore a snapshot to avoid a very long initial sync. Needs the most disk and RAM.
+* **archive-node** – keeps full historical state and raises the RPC limits. Required for historical `eth_call`, `debug_traceTransaction`, and log-heavy indexing. Its RPC namespaces default to the same read-only set as the other profiles; `debug`, `trace`, `txpool`, `reth` are enabled explicitly through `HTTP_API` / `WS_API` – see [Available RPC Methods](#available-rpc-methods). Archive cannot snap-sync, so it always syncs by re-executing from L1 – restore a snapshot to avoid a very long initial sync. Needs the most disk and RAM.
 
 ## Prerequisites
 
@@ -161,6 +161,8 @@ Public endpoints and (optionally) a snapshot:
    ```
 
    `L1_RPC_KIND` is `basic` by default. Set it to one of `alchemy`, `quicknode`, `infura`, `parity`, `nethermind`, `debug_geth`, `erigon`, `standard`, `any` if your provider supports extra receipt-fetching methods.
+
+   `HTTP_API` (port `8545`) and `WS_API` (port `8546`) are `eth,net,web3,rpc` by default and apply to all three profiles – see [Available RPC Methods](#available-rpc-methods) before widening them.
 
 4. Restore an `op-reth` snapshot if you run `full-node` or `archive-node` (recommended) – see [Restoring from a snapshot](#restoring-from-a-snapshot). `full-snap-node` skips this; it snap-syncs from `WHITECHAIN_RETH_TRUSTED_PEERS`.
 
@@ -340,10 +342,23 @@ You do not need any direct access to the sequencer. The pattern is the same as o
 
 ## Available RPC Methods
 
-`op-reth` namespaces depend on the profile:
+`op-reth` namespaces come from two `.env` variables, shared by all three profiles:
 
-* `full-snap-node` / `full-node` – HTTP/WS on its ports: `eth`, `net`, `web3`, `rpc`
-* `archive-node` – HTTP: `eth`, `net`, `web3`, `rpc`, `debug`, `trace`, `txpool`, `reth`; WS: `eth`, `net`, `web3`, `rpc`
+* HTTP (`8545`), every profile – `HTTP_API`, default `eth,net,web3,rpc`.
+* WS (`8546`), every profile – `WS_API`, default `eth,net,web3,rpc`.
+
+`archive-node` is no exception: by default it serves the same read-only set as the pruned profiles. The two ports are independent – widening one does not touch the other.
+
+To enable tracing on an archive node, widen it explicitly in `.env`:
+
+```
+HTTP_API=eth,net,web3,rpc,debug,trace,txpool,reth
+WS_API=eth,net,web3,rpc
+```
+
+Then `make reup PROFILE=archive-node`. Add the wide set to `WS_API` too only if you need those methods over WebSocket. Only `archive-node` has the history these methods read, so the wider set is pointless on the pruned profiles.
+
+The stack provides no authentication, CORS or vhost restriction on `8545`/`8546`, and `RPC_MAX_TRACING_REQUESTS` limits how many tracing calls run concurrently, not what one call costs – a single `trace_block` or `debug_traceTransaction` on a heavy block can take seconds of CPU and gigabytes of RAM. Enable these namespaces only behind a reverse proxy that allowlists methods and rate-limits clients (Whitechain runs `proxyd` in front of its own public RPC). Never expose them directly to untrusted clients.
 
 `op-node` exposes on RPC `9545` (loopback `127.0.0.1` only):
 
@@ -371,7 +386,7 @@ If the upgrade includes a new hardfork, replace `artifacts/<network>/rollup.json
 
 * The Engine API on port `8551` is bound only to the profile's own compose network (`public_rpc_full_snap`, `public_rpc_full`, or `public_rpc_archive`) and is not exposed to the host. Do not publish it.
 * op-node RPC on port `9545` is bound to loopback (`127.0.0.1`) only, so it is reachable from the host but not from the network. The `admin` namespace is not enabled, so it serves only read-only rollup, P2P, and super-root status methods (`optimism`, `opp2p`, `superroot`).
-* op-reth exposes no `admin` namespace on any profile. The public JSON-RPC (`8545`) and WebSocket (`8546`) ports serve only read-only namespaces (`eth`, `net`, `web3`, `rpc`; archive adds `debug`, `trace`, `txpool`, `reth`). The node exposes no state-mutating or administrative control surface.
+* op-reth exposes no `admin` namespace on any profile. The public JSON-RPC (`8545`) and WebSocket (`8546`) ports serve only read-only namespaces – by default `eth`, `net`, `web3`, `rpc` on every profile, including `archive-node`. The node exposes no state-mutating or administrative control surface. `debug`, `trace`, `txpool` and `reth` are off unless you add them to `HTTP_API` or `WS_API`; they are read-only too, but expensive enough to be a denial-of-service vector, so put a method-allowlisting, rate-limiting proxy in front before enabling them.
 * On `full-snap-node` the EL P2P port `30303` is published on all interfaces (TCP and UDP) – op-reth needs it to snap-sync and to peer over devp2p. It carries no RPC and no administrative methods. `full-node` and `archive-node` do not publish it.
 * `keys/<profile>/jwt.txt` is local to your machine and is used only between the `op-node` and `op-reth` of that profile. Every profile has its own secret and its own compose network, so containers of one profile can neither reach nor authenticate against another profile's Engine API. It does not need to match anything outside. If you upgraded from a version with a single `keys/jwt.txt`, the next `make up` generates the per-profile secret and recreates both containers with it; the old file is unused and can be deleted.
 * The node holds no project-side private keys. Operate it as a read and forward node.

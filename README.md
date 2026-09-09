@@ -34,11 +34,11 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
 | --- | --- | --- | --- | --- | --- |
 | `full-snap-node` | Recommended default – fastest, simplest bootstrap | Pruned (`--full`) | execution-layer (snap) | Not needed | Yes |
 | `full-node` | Public RPC node without snap sync | Pruned (`--full`) | consensus-layer | Recommended | Yes |
-| `archive-node` | Full historical state + tracing | Archive (full history) | consensus-layer | Recommended | Yes |
+| `archive-node` | Full historical state, tracing on opt-in | Archive (full history) | consensus-layer | Recommended | Yes |
 
 - **full-snap-node** – the recommended default and fastest, simplest way to bring up a node. Pruned execution state, basic RPC namespaces (`eth,net,web3,rpc`). Bootstraps by snap-syncing from a trusted reth peer (`WHITECHAIN_RETH_TRUSTED_PEERS`) instead of re-executing, so it needs no DB snapshot. Use it when you have a reachable seed reth enode (your own fleet, or one the Whitechain team provides).
 - **full-node** – same pruned state and namespaces as `full-snap-node`, but syncs in consensus-layer mode by re-executing the chain from L1. Use it when you have no trusted reth peer to snap-sync from. Restore a DB snapshot to avoid a long initial sync.
-- **archive-node** – keeps the full historical state and enables `debug`, `trace`, `txpool`, `reth` namespaces plus higher RPC limits. Use it for explorers, indexers, and historical `eth_call`/`debug_traceTransaction`. Syncs by re-executing from L1 (archive cannot snap-sync), so restore a DB snapshot to avoid a very long initial sync. Needs the most disk and RAM.
+- **archive-node** – keeps the full historical state and raises the RPC limits. Use it for explorers, indexers, and historical `eth_call`/`debug_traceTransaction`. Its RPC namespaces are the same read-only default as the other profiles (`HTTP_API` / `WS_API` = `eth,net,web3,rpc`); `debug`, `trace`, `txpool`, `reth` are an explicit opt-in through those variables – see [Available RPC namespaces](#available-rpc-namespaces). Syncs by re-executing from L1 (archive cannot snap-sync), so restore a DB snapshot to avoid a very long initial sync. Needs the most disk and RAM.
 
 ## Database snapshots (skip the long initial sync)
 
@@ -167,6 +167,8 @@ Optional variables (with defaults):
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `HTTP_API` | `eth,net,web3,rpc` | op-reth HTTP (`8545`) RPC namespaces, same variable for all three profiles. Comma-separated, no spaces. See [Available RPC namespaces](#available-rpc-namespaces) before adding `debug`, `trace`, `txpool`, `reth` |
+| `WS_API` | `eth,net,web3,rpc` | op-reth WebSocket (`8546`) RPC namespaces, same variable for all three profiles. Same rules as `HTTP_API` |
 | `L1_RPC_KIND` | `basic` | One of `alchemy`, `quicknode`, `infura`, `parity`, `nethermind`, `debug_geth`, `erigon`, `standard`, `any` if your provider supports extra receipt methods |
 | `WHITECHAIN_PUBLIC_OP_NODE_P2P` | empty | Static op-node peer multiaddr `/dns4/<host>/tcp/9222/p2p/<peerID>` |
 | `OP_NODE_ONLY_REQ_TO_STATIC` | `false` | Restrict unsafe-block requests to the static peer only |
@@ -181,6 +183,8 @@ Archive-only RPC limits (optional):
 | `RPC_MAX_LOGS_PER_RESPONSE` | `20000` |
 | `RPC_MAX_BLOCKS_PER_FILTER` | `100000` |
 | `RPC_MAX_TRACING_REQUESTS` | `8` |
+
+`RPC_MAX_TRACING_REQUESTS` caps how many tracing calls run at once; it does not cap the cost of a single call. It only matters once `debug`/`trace` are enabled through `HTTP_API` or `WS_API`.
 
 Host port overrides – see [Ports](#ports).
 
@@ -282,8 +286,10 @@ curl -s -X POST http://127.0.0.1:8545 \
 
 ## Available RPC namespaces
 
-- `full-snap-node` / `full-node` op-reth HTTP/WS: `eth`, `net`, `web3`, `rpc`
-- `archive-node` op-reth HTTP: `eth`, `net`, `web3`, `rpc`, `debug`, `trace`, `txpool`, `reth`; WS: `eth`, `net`, `web3`, `rpc`
+- op-reth HTTP (`8545`), all three profiles: `HTTP_API` from `.env`, default `eth,net,web3,rpc`.
+- op-reth WS (`8546`), all three profiles: `WS_API` from `.env`, default `eth,net,web3,rpc`.
+- Both variables drive every profile – `archive-node` included – so an archive node serves the same read-only set as the others unless you widen it deliberately. The two ports are configured independently: widening `HTTP_API` does not change WS, and the reverse.
+- `debug`, `trace`, `txpool`, `reth` are an explicit opt-in: add them to `HTTP_API` (and to `WS_API` only if you also need them over WebSocket), for example `HTTP_API=eth,net,web3,rpc,debug,trace,txpool,reth`. Only meaningful on `archive-node`, which has the history these methods read. The stack ships no authentication, CORS or vhost restriction on `8545`/`8546`, and `RPC_MAX_TRACING_REQUESTS` bounds concurrency, not the cost of one call – a single `trace_block` or `debug_traceTransaction` on a heavy block costs seconds of CPU and gigabytes of RAM. Enable them only behind a reverse proxy that allowlists methods and rate-limits clients (Whitechain runs `proxyd` in front of its own public RPC), never on a port open to untrusted clients.
 - op-reth exposes no `admin` namespace on any profile – all exposed namespaces are read-only.
 - op-node RPC (`9545`, loopback-only): `optimism`, `opp2p`, `superroot` (the `admin` namespace is not enabled). `superroot` is a read-only OP Stack interop API (`superroot_getSuperRootAtTimestamp`) that op-node registers unconditionally; it cannot be disabled and is unused in this single-chain deployment.
 
