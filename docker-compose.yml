@@ -1,7 +1,7 @@
 name: whitechain-public-rpc
 
 x-op-reth-common: &op-reth-common
-  image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:latest}
+  image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:v2.3.3}
   restart: unless-stopped
   networks:
     - public_rpc
@@ -17,7 +17,7 @@ x-op-reth-common: &op-reth-common
     start_period: 60s
 
 x-op-node-common: &op-node-common
-  image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:latest}
+  image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:v1.19.3}
   restart: unless-stopped
   networks:
     - public_rpc

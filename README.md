@@ -170,8 +170,8 @@ Optional variables (with defaults):
 | `L1_RPC_KIND` | `basic` | One of `alchemy`, `quicknode`, `infura`, `parity`, `nethermind`, `debug_geth`, `erigon`, `standard`, `any` if your provider supports extra receipt methods |
 | `WHITECHAIN_PUBLIC_OP_NODE_P2P` | empty | Static op-node peer multiaddr `/dns4/<host>/tcp/9222/p2p/<peerID>` |
 | `OP_NODE_ONLY_REQ_TO_STATIC` | `false` | Restrict unsafe-block requests to the static peer only |
-| `OP_RETH_IMAGE` | `op-reth:v2.0.0` | Pin the op-reth image |
-| `OP_NODE_IMAGE` | `op-node:v1.19.0` | Pin the op-node image |
+| `OP_RETH_IMAGE` | `public.ecr.aws/l8q8a0h5/op-reth:v2.3.3` | Pin the op-reth image |
+| `OP_NODE_IMAGE` | `public.ecr.aws/l8q8a0h5/op-node:v1.19.3` | Pin the op-node image |
 
 Archive-only RPC limits (optional):
 
