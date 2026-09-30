@@ -8,7 +8,6 @@ By the end of this tutorial you will:
 
 * Deploy an external Whitechain RPC node (op-reth + op-node) on your own server
 * Choose the right node profile – `full-snap-node`, `full-node`, or `archive-node`
-* Optionally restore a published `op-reth` snapshot to skip the long initial sync
 * Have it follow the canonical Whitechain L2 chain over P2P and L1 derivation
 * Expose JSON-RPC and WebSocket endpoints for your applications
 * Forward end-user transactions to the Whitechain network
@@ -26,7 +25,7 @@ You only need:
 * Your own L1 RPC and Beacon endpoints
 * A public IP for the node (`PUBLIC_IP`), advertised for P2P
 * Outbound network access to the public Whitechain endpoints
-* The published `genesis.json` and `rollup.json` artifacts for the chosen network
+* The published `genesis.json` and `rollup.json` artifacts for the chosen network, from [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap)
 * For `full-snap-node`: a trusted reth enode to snap-sync from (`WHITECHAIN_RETH_TRUSTED_PEERS`)
 
 > **Note:** This stack does not contain any project-side private keys. The sequencer, batcher, proposer, and challenger keys remain on the Whitechain side. You operate a follow-only node.
@@ -42,8 +41,8 @@ A node is defined by two independent choices. The profiles are fixed combination
 
 **Sync method** – how op-reth obtains state:
 
-* **consensus-layer** (op-node default) – op-node derives blocks from L1 and feeds them to op-reth, which **re-executes every transaction** from genesis. No EL peer needed, but the initial sync is **long** unless you restore a snapshot.
-* **execution-layer** (`--syncmode=execution-layer`, "snap") – op-reth **snap-syncs the state snapshot** from a trusted reth peer over EL P2P. Fast, no snapshot restore, but needs a reachable seed peer. Snap sync only produces pruned state – it cannot build an archive.
+* **consensus-layer** (op-node default) – op-node derives blocks from L1 and feeds them to op-reth, which **re-executes every transaction** from genesis. No EL peer needed, but the initial sync is **long** on a chain with history behind it.
+* **execution-layer** (`--syncmode=execution-layer`, "snap") – op-reth **snap-syncs the state** from a trusted reth peer over EL P2P. Fast, but needs a reachable seed peer. Snap sync only produces pruned state – it cannot build an archive.
 
 | Storage | consensus-layer (re-execute) | execution-layer (snap) |
 | --- | --- | --- |
@@ -54,15 +53,15 @@ A node is defined by two independent choices. The profiles are fixed combination
 
 The stack ships three profiles. Pick one with `PROFILE=<profile>` or a per-profile `make` target.
 
-| Profile | Use it for | Storage | Sync method | Snapshot | Public RPC |
+| Profile | Use it for | Storage | Sync method | Initial sync | Public RPC |
 | --- | --- | --- | --- | --- | --- |
-| `full-snap-node` | Recommended default – fastest, simplest bootstrap | Pruned (`--full`) | execution-layer (snap) | Not needed | Yes |
-| `full-node` | Public RPC without snap sync | Pruned (`--full`) | consensus-layer | Recommended | Yes |
-| `archive-node` | Explorers, indexers, historical tracing | Full history | consensus-layer | Recommended | Yes |
+| `full-snap-node` | Recommended default – fastest, simplest bootstrap | Pruned (`--full`) | execution-layer (snap) | Fast | Yes |
+| `full-node` | Public RPC without snap sync | Pruned (`--full`) | consensus-layer | Long – re-executes from genesis | Yes |
+| `archive-node` | Explorers, indexers, historical tracing | Full history | consensus-layer | Longest – re-executes from genesis | Yes |
 
-* **full-snap-node** – the recommended default and fastest, simplest way to bring up a node. Pruned execution state and the basic RPC namespaces `eth,net,web3,rpc`. Bootstraps by snap-syncing from a trusted reth peer (`WHITECHAIN_RETH_TRUSTED_PEERS`) instead of re-executing, so it needs no snapshot. Use it when you have a reachable seed reth enode.
-* **full-node** – same pruned state and namespaces as `full-snap-node`, but syncs in consensus-layer mode by re-executing the chain from L1. Use it when you have no trusted reth peer to snap-sync from. Restore a snapshot to avoid a long initial sync.
-* **archive-node** – keeps full historical state and adds the `debug`, `trace`, `txpool`, `reth` namespaces plus higher RPC limits. Required for historical `eth_call`, `debug_traceTransaction`, and log-heavy indexing. Archive cannot snap-sync, so it always syncs by re-executing from L1 – restore a snapshot to avoid a very long initial sync. Needs the most disk and RAM.
+* **full-snap-node** – the recommended default and fastest, simplest way to bring up a node. Pruned execution state and the basic RPC namespaces `eth,net,web3,rpc`. Bootstraps by snap-syncing from a trusted reth peer (`WHITECHAIN_RETH_TRUSTED_PEERS`) instead of re-executing. Use it when you have a reachable seed reth enode.
+* **full-node** – same pruned state and namespaces as `full-snap-node`, but syncs in consensus-layer mode by re-executing the chain from L1. Use it when you have no trusted reth peer to snap-sync from. Expect a long initial sync on a chain with history behind it.
+* **archive-node** – keeps full historical state and raises the RPC limits. Required for historical `eth_call`, `debug_traceTransaction`, and log-heavy indexing. Its RPC namespaces default to the same read-only set as the other profiles; `debug`, `trace`, `txpool`, `reth` are enabled explicitly through `HTTP_API` / `WS_API` – see [Available RPC Methods](#available-rpc-methods). Archive cannot snap-sync, so it always syncs by re-executing from L1, which makes its initial sync the longest of the three. Needs the most disk and RAM.
 
 ## Prerequisites
 
@@ -75,7 +74,7 @@ The stack ships three profiles. Pick one with `PROFILE=<profile>` or a per-profi
 | Storage | NVMe SSD, 500 GB min / 1 TB recommended (≥ 2× current chain size + 20%) | NVMe SSD, sized for full history (≥ 1 TB) |
 | Network | 100 Mbps+ | 1 Gbps |
 
-Disk usage grows with the chain. Restoring a snapshot (below) does not change the steady-state growth – it only saves the initial sync time.
+Disk usage grows with the chain.
 
 ### Network ports
 
@@ -87,15 +86,19 @@ Only one profile runs at a time, so all profiles share the same host ports. Each
 | WebSocket RPC | `8546` | `HOST_WS_PORT` |
 | op-node RPC | `9545` (loopback `127.0.0.1` only) | `HOST_OP_NODE_RPC_PORT` |
 | op-node P2P (TCP+UDP) | `9222` | `HOST_OP_NODE_P2P_PORT` |
-| EL P2P (TCP+UDP) | `30303` (disabled by default) | `HOST_EL_P2P_PORT` |
+| EL P2P (TCP+UDP) | `30303` – published on `full-snap-node`, not published on `full-node` / `archive-node` | `HOST_EL_P2P_PORT` |
 
-The Engine API (`8551`) stays on the internal compose network and is not published. op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host but never from the network – and the `admin` namespace is not enabled, so it serves only the read-only `optimism`, `opp2p`, and `superroot` namespaces. The EL P2P port (`30303`) is not published by default (snap sync only needs outbound connectivity to the trusted peer); its host mapping is commented out in `docker-compose.yml`, uncomment it only if you want inbound EL peering. Run only one profile at a time – they all bind the same host ports; to run two side by side on one host, override one profile's ports in `.env`.
+The Engine API (`8551`) stays on the profile's own compose network and is not published. op-node RPC (`9545`) is bound to loopback (`127.0.0.1`) only – reachable for local monitoring on the host but never from the network – and the `admin` namespace is not enabled, so it serves only the read-only `optimism`, `opp2p`, and `superroot` namespaces.
+
+The EL P2P port (`30303`) is published **only by the `full-snap-node` profile** – the recommended default – on all interfaces (`0.0.0.0`), TCP and UDP. That profile bootstraps over EL P2P: op-reth snap-syncs the state from the trusted reth peer and uses reth discovery (UDP `30303`) and devp2p (TCP `30303`) for it, so the port is reachable for inbound EL peers as well. The upstream OP Stack compose example publishes the same port the same way. It carries devp2p traffic only – no RPC, no `admin` surface – but if you do not want inbound EL peering, remap it with `HOST_EL_P2P_PORT` or block it at the firewall. For `full-node` and `archive-node` the mapping is commented out in `docker-compose.yml` and the port is not published: both sync in consensus-layer mode from L1 and need no EL peering.
+
+Run only one profile at a time – they all bind the same host ports; to run two side by side on one host, override one profile's ports in `.env`.
 
 ### Software
 
 * Docker with Compose v2
 * `make`, `git`, `openssl`, `curl`, `jq`
-* `zstd` and `tar` if you restore from a snapshot
+* `zstd` and `tar` if you take your own datadir backups
 
 ### L1 RPC and Beacon
 
@@ -108,29 +111,43 @@ You need your own Ethereum L1 RPC and Beacon endpoints. Either run your own L1 n
 
 ### Resources from the Whitechain team
 
-Two static files for the chosen network:
+Two static files for the chosen network, published in the [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap) repository (see also [Network artifacts](https://docs.whitechain.io/operate/run-a-node/network-artifacts) in the docs):
 
 * `genesis.json` – L2 execution genesis
 * `rollup.json` – OP rollup configuration
 
-Public endpoints and (optionally) a snapshot:
+That repository is the authoritative copy of both files and of their SHA-256 hashes. This repository ships neither the artifacts nor a checksum file of its own, so there is exactly one source to verify against.
+
+Public endpoints:
 
 * `WHITECHAIN_PUBLIC_RPC` – public Whitechain JSON-RPC URL, the transaction-forwarding target
 * `WHITECHAIN_PUBLIC_OP_NODE_P2P` – optional static op-node peer, `/dns4/<host>/tcp/9222/p2p/<peerID>` or `/ip4/<ip>/tcp/9222/p2p/<peerID>`
 * `WHITECHAIN_RETH_TRUSTED_PEERS` – trusted reth enode for `full-snap-node` to snap-sync from
-* A published `op-reth` database snapshot URL (recommended for `full-node` / `archive-node`)
 
 ## Running a Node
 
 1. Get the manifests directory `public-rpc-node/` on your server.
-2. Place the network artifacts under `artifacts/<network>/`:
+2. Get the network artifacts from the bootstrap repository, verify them, and place them under `artifacts/<network>/`:
+
+   ```bash
+   git clone https://github.com/whitechain-labs/whitechain-bootstrap.git
+   cd whitechain-bootstrap
+
+   # compare the output against the SHA-256 hashes published in the
+   # whitechain-bootstrap README and on the docs page
+   shasum -a 256 testnet/genesis.json testnet/rollup.json
+
+   cp testnet/genesis.json testnet/rollup.json <public-rpc-node>/artifacts/testnet/
+   ```
+
+   The result must be:
 
    ```
-   public-rpc-node/artifacts/mainnet/genesis.json
-   public-rpc-node/artifacts/mainnet/rollup.json
+   public-rpc-node/artifacts/testnet/genesis.json
+   public-rpc-node/artifacts/testnet/rollup.json
    ```
 
-   For the testnet use `artifacts/testnet/`. The folder name must match `WHITECHAIN_NETWORK` in `.env`.
+   For the mainnet use `artifacts/mainnet/`. The folder name must match `WHITECHAIN_NETWORK` in `.env`. Do not skip the hash comparison: `genesis.json` defines the chain your node considers canonical, and `rollup.json` defines how it derives it – a wrong or tampered file puts the node on a different chain. `make up` also cross-checks the two files against each other, but that catches mismatched files, not tampered ones – see [Artifact validation](#artifact-validation).
 
 3. Create your `.env`:
 
@@ -158,9 +175,9 @@ Public endpoints and (optionally) a snapshot:
 
    `L1_RPC_KIND` is `basic` by default. Set it to one of `alchemy`, `quicknode`, `infura`, `parity`, `nethermind`, `debug_geth`, `erigon`, `standard`, `any` if your provider supports extra receipt-fetching methods.
 
-4. Restore an `op-reth` snapshot if you run `full-node` or `archive-node` (recommended) – see [Restoring from a snapshot](#restoring-from-a-snapshot). `full-snap-node` skips this; it snap-syncs from `WHITECHAIN_RETH_TRUSTED_PEERS`.
+   `HTTP_API` (port `8545`) and `WS_API` (port `8546`) are `eth,net,web3,rpc` by default and apply to all three profiles – see [Available RPC Methods](#available-rpc-methods) before widening them.
 
-5. Start the profile you chose:
+4. Start the profile you chose:
 
    ```bash
    make up-full-snap-node   # recommended default: pruned node, snap-syncs from a trusted peer
@@ -170,59 +187,34 @@ Public endpoints and (optionally) a snapshot:
 
    `make up` will:
 
-   1. Validate that `.env` and `artifacts/<network>/{genesis,rollup}.json` exist.
-   2. Generate `keys/jwt.txt` if missing.
+   1. Validate `.env`, and validate that `artifacts/<network>/{genesis,rollup}.json` exist and are consistent with each other – see [Artifact validation](#artifact-validation).
+   2. Generate `keys/<profile>/jwt.txt` if missing.
    3. Run `docker compose --profile <profile> up -d`.
 
-6. Confirm you get a response from your node (use the profile's HTTP port):
+5. Confirm you get a response from your node (use the profile's HTTP port):
 
    ```bash
    curl -d '{"id":0,"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["latest", false]}' \
      -H 'Content-Type: application/json' http://127.0.0.1:8545
    ```
 
-> **Warning:** For `full-node` and `archive-node`, initial sync from genesis re-executes every transaction and can take from minutes on a fresh testnet to many hours on a long-running chain. Restore a snapshot to cut this down. `full-snap-node` bootstraps fast from its trusted peer instead.
+> **Warning:** For `full-node` and `archive-node`, initial sync from genesis re-executes every transaction and can take from minutes on a fresh testnet to many hours on a long-running chain. `full-snap-node` bootstraps fast from its trusted peer instead.
 
-## Restoring from a Snapshot
+## Artifact validation
 
-This applies to the **non-snap** profiles, `full-node` and `archive-node`. They sync in consensus-layer mode and re-execute the chain from genesis, which is slow. The Whitechain team publishes periodic `op-reth` database snapshots. Restoring one lets you start near a recent block and only derive the gap since the snapshot was taken.
+`make check-env`, a prerequisite of `make up`, does more than check that the files exist. It cross-checks `artifacts/<network>/genesis.json` against `artifacts/<network>/rollup.json` with `jq` and refuses to start the node on any mismatch:
 
-> `full-snap-node` does **not** need this – it snap-syncs the state directly from `WHITECHAIN_RETH_TRUSTED_PEERS`.
+| Check | Fails when |
+| --- | --- |
+| `genesis.config.chainId` = `rollup.l2_chain_id` | the two files describe different chains, e.g. a `genesis.json` from one network next to a `rollup.json` from another |
+| `genesis.timestamp` = `rollup.genesis.l2_time` | the files come from different deployments of the same chain ID |
+| `rollup.l1_chain_id` matches the network | the whole pair belongs to the other network – `mainnet` must settle on Ethereum mainnet (`1`), `testnet` on Sepolia (`11155111`) |
 
-1. Stop the node if running:
-
-   ```bash
-   make down PROFILE=full-node
-   ```
-
-2. Download and extract the snapshot for your network and profile into the matching data directory. The archive expands into the `op-reth` `db`, `static_files`, and related folders:
-
-   ```bash
-   mkdir -p data/full-node/op-reth
-   curl -L "<WHITECHAIN_SNAPSHOT_URL>/op-reth-mainnet-full.tar.zst" \
-     | zstd -d \
-     | tar -x -C data/full-node/op-reth
-   ```
-
-   After extraction you should have `data/full-node/op-reth/db`, `data/full-node/op-reth/static_files`, and so on.
-
-3. Start the node and watch it catch up:
-
-   ```bash
-   make up-full-node
-   make logs-full-node
-   ```
-
-Rules of thumb:
-
-* Match the snapshot to the **profile**. A pruned snapshot cannot serve archive queries – restore an archive snapshot into `data/archive-node/op-reth` for an archive node.
-* Restore only the `op-reth` data. The `op-node` directory (`peerstore`, `discovery`, `safedb`) is rebuilt automatically.
-* You still need a working L1 RPC + Beacon to derive everything after the snapshot block.
-* Without a snapshot, the node re-executes from genesis – expect a long initial sync.
+These are **consistency** checks on your configuration, not authenticity checks. A pair of files tampered with consistently passes all three. Authenticity comes from the source instead: take the files from [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap) and compare their SHA-256 with the hashes published there, as in [Running a Node](#running-a-node) step 2.
 
 ## Creating a Backup
 
-This is the procedure the Whitechain team uses to produce the published `op-reth` snapshots, and the same steps you can follow to take your own daily backup of a `full-node` / `archive-node` datadir. Back up only the `op-reth` data; the `op-node` directory rebuilds itself.
+Your own backup of a `full-node` / `archive-node` datadir, so a disk failure or a corrupted database does not cost you a full resync from genesis. Back up only the `op-reth` data; the `op-node` directory rebuilds itself.
 
 1. Stop the node to get a consistent on-disk database:
 
@@ -242,9 +234,9 @@ This is the procedure the Whitechain team uses to produce the published `op-reth
    make up PROFILE=full-node
    ```
 
-4. Copy the archive to the location clients download from (object storage, mirror, etc.). Clients then restore it as in [Restoring from a Snapshot](#restoring-from-a-snapshot).
+To restore your own backup: stop the profile, replace `data/<profile>/op-reth` with the extracted archive, start the profile again. The node then derives everything after the backup point from L1 and catches up the unsafe head over P2P, so a working L1 RPC + Beacon is still required.
 
-> **Note:** Match the archive name to the network and profile it was taken from. A pruned (`full-node`) backup cannot serve archive queries.
+> **Note:** A backup only fits the profile it was taken from – a pruned (`full-node`) datadir cannot serve archive queries. Keep the network and profile in the archive name.
 
 ## Data Layout
 
@@ -256,8 +248,6 @@ data/
   full-node/{op-reth,op-node}
   archive-node/{op-reth,op-node}
 ```
-
-Snapshots are restored into `data/<profile>/op-reth/`.
 
 ### Syncing
 
@@ -308,7 +298,7 @@ make logs PROFILE=archive-node   # tail logs
 make config PROFILE=archive-node # render merged compose config
 ```
 
-Per-profile shortcuts exist for each: `make up-full-snap-node`, `make logs-full-node`, `make reup-archive-node`, etc. `make ensure-jwt` generates `keys/jwt.txt` manually; `make help` lists everything.
+Per-profile shortcuts exist for each: `make up-full-snap-node`, `make logs-full-node`, `make reup-archive-node`, etc. `make ensure-jwt` generates `keys/<profile>/jwt.txt` manually; `make help` lists everything.
 
 To wipe local state and resync a profile from genesis:
 
@@ -318,7 +308,7 @@ rm -rf data/full-node/op-reth data/full-node/op-node
 make up PROFILE=full-node
 ```
 
-> **Warning:** This deletes the local chain database for that profile. The next start re-derives the chain from L1 and pulls unsafe blocks over P2P. For `full-node`/`archive-node` prefer restoring a snapshot over a full genesis resync, and do not run this against a production-serving node without a maintenance window.
+> **Warning:** This deletes the local chain database for that profile. The next start re-derives the chain from L1 and pulls unsafe blocks over P2P. On `full-node`/`archive-node` that means re-executing the chain from genesis, so do not run this against a production-serving node without a maintenance window.
 
 ## Sending Transactions
 
@@ -336,10 +326,23 @@ You do not need any direct access to the sequencer. The pattern is the same as o
 
 ## Available RPC Methods
 
-`op-reth` namespaces depend on the profile:
+`op-reth` namespaces come from two `.env` variables, shared by all three profiles:
 
-* `full-snap-node` / `full-node` – HTTP/WS on its ports: `eth`, `net`, `web3`, `rpc`
-* `archive-node` – HTTP: `eth`, `net`, `web3`, `rpc`, `debug`, `trace`, `txpool`, `reth`; WS: `eth`, `net`, `web3`, `rpc`
+* HTTP (`8545`), every profile – `HTTP_API`, default `eth,net,web3,rpc`.
+* WS (`8546`), every profile – `WS_API`, default `eth,net,web3,rpc`.
+
+`archive-node` is no exception: by default it serves the same read-only set as the pruned profiles. The two ports are independent – widening one does not touch the other.
+
+To enable tracing on an archive node, widen it explicitly in `.env`:
+
+```
+HTTP_API=eth,net,web3,rpc,debug,trace,txpool,reth
+WS_API=eth,net,web3,rpc
+```
+
+Then `make reup PROFILE=archive-node`. Add the wide set to `WS_API` too only if you need those methods over WebSocket. Only `archive-node` has the history these methods read, so the wider set is pointless on the pruned profiles.
+
+The stack provides no authentication, CORS or vhost restriction on `8545`/`8546`, and `RPC_MAX_TRACING_REQUESTS` limits how many tracing calls run concurrently, not what one call costs – a single `trace_block` or `debug_traceTransaction` on a heavy block can take seconds of CPU and gigabytes of RAM. Enable these namespaces only behind a reverse proxy that allowlists methods and rate-limits clients (Whitechain runs `proxyd` in front of its own public RPC). Never expose them directly to untrusted clients.
 
 `op-node` exposes on RPC `9545` (loopback `127.0.0.1` only):
 
@@ -359,16 +362,17 @@ docker compose pull
 make reup PROFILE=full-snap-node
 ```
 
-If the upgrade includes a new hardfork, replace `artifacts/<network>/rollup.json` with the published version before running `make reup`.
+If the upgrade includes a new hardfork, pull the new `rollup.json` from [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap), compare its SHA-256 against the hash published there, copy it into `artifacts/<network>/`, and only then run `make reup`. The published hashes change whenever a hardfork changes the artifacts, so verify again on every update.
 
 > **Note:** The Whitechain team announces hardforks in advance. Apply the new `rollup.json` and `genesis.json` (if changed) before the activation timestamp to avoid a chain-divergence stall.
 
 ## Security Notes
 
-* The Engine API on port `8551` is bound only to the internal compose network and is not exposed to the host. Do not publish it.
+* The Engine API on port `8551` is bound only to the profile's own compose network (`public_rpc_full_snap`, `public_rpc_full`, or `public_rpc_archive`) and is not exposed to the host. Do not publish it.
 * op-node RPC on port `9545` is bound to loopback (`127.0.0.1`) only, so it is reachable from the host but not from the network. The `admin` namespace is not enabled, so it serves only read-only rollup, P2P, and super-root status methods (`optimism`, `opp2p`, `superroot`).
-* op-reth exposes no `admin` namespace on any profile. The public JSON-RPC (`8545`) and WebSocket (`8546`) ports serve only read-only namespaces (`eth`, `net`, `web3`, `rpc`; archive adds `debug`, `trace`, `txpool`, `reth`). The node exposes no state-mutating or administrative control surface.
-* `keys/jwt.txt` is local to your machine and is used only between `op-node` and `op-reth` in this stack. It does not need to match anything outside.
+* op-reth exposes no `admin` namespace on any profile. The public JSON-RPC (`8545`) and WebSocket (`8546`) ports serve only read-only namespaces – by default `eth`, `net`, `web3`, `rpc` on every profile, including `archive-node`. The node exposes no state-mutating or administrative control surface. `debug`, `trace`, `txpool` and `reth` are off unless you add them to `HTTP_API` or `WS_API`; they are read-only too, but expensive enough to be a denial-of-service vector, so put a method-allowlisting, rate-limiting proxy in front before enabling them.
+* On `full-snap-node` the EL P2P port `30303` is published on all interfaces (TCP and UDP) – op-reth needs it to snap-sync and to peer over devp2p. It carries no RPC and no administrative methods. `full-node` and `archive-node` do not publish it.
+* `keys/<profile>/jwt.txt` is local to your machine and is used only between the `op-node` and `op-reth` of that profile. Every profile has its own secret and its own compose network, so containers of one profile can neither reach nor authenticate against another profile's Engine API. It does not need to match anything outside. If you upgraded from a version with a single `keys/jwt.txt`, the next `make up` generates the per-profile secret and recreates both containers with it; the old file is unused and can be deleted.
 * The node holds no project-side private keys. Operate it as a read and forward node.
 * Restrict inbound access to the JSON-RPC ports you choose to expose – put them behind a firewall, reverse proxy, or rate limiter before serving untrusted clients.
 
@@ -380,7 +384,15 @@ Copy from `.env.mainnet.example` (or `.env.testnet.example`) and fill the values
 
 ### `Missing artifacts/<network>/genesis.json`
 
-Place `genesis.json` and `rollup.json` for the chosen network under `artifacts/<network>/`. The folder name has to match `WHITECHAIN_NETWORK` in `.env`.
+The artifacts are not part of this repository. Copy `genesis.json` and `rollup.json` for the chosen network from [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap) into `artifacts/<network>/`, verifying their SHA-256 against the hashes published there – see [Running a Node](#running-a-node) step 2. The folder name has to match `WHITECHAIN_NETWORK` in `.env`.
+
+### `L2 chain ID mismatch` / `L2 genesis timestamp mismatch` / `L1 chain ID mismatch`
+
+`genesis.json` and `rollup.json` in `artifacts/<network>/` do not belong together, or the pair does not belong to the network selected by `WHITECHAIN_NETWORK`. Re-copy both files from the same network directory of [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap) and re-check their SHA-256 – see [Artifact validation](#artifact-validation).
+
+### `jq not found`
+
+`make check-env` uses `jq` to cross-check the artifacts. Install it (`apt install jq`, `brew install jq`) and run again.
 
 ### `set PUBLIC_IP in .env`
 
@@ -396,19 +408,19 @@ The `full-snap-node` profile needs a trusted reth enode to snap-sync from. Set i
 
 ### `failed to insert unsafe payload ... node is syncing` (full-node / archive-node, early sync)
 
-Expected during the initial consensus-layer sync of a fresh database. op-node receives an unsafe head from gossip but op-reth has not re-executed up to its parent yet, so the forkchoice update returns `SYNCING`. Meanwhile `Advancing bq origin` shows L1 derivation is progressing. The messages stop once the node catches up. To avoid the long catch-up, restore a snapshot (`full-node`/`archive-node`) or use `full-snap-node`.
+Expected during the initial consensus-layer sync of a fresh database. op-node receives an unsafe head from gossip but op-reth has not re-executed up to its parent yet, so the forkchoice update returns `SYNCING`. Meanwhile `Advancing bq origin` shows L1 derivation is progressing. The messages stop once the node catches up. To avoid the long catch-up, use `full-snap-node`.
 
-### Restored snapshot but the node resyncs from genesis
+### Restored your own backup but the node resyncs from genesis
 
 * Confirm the data landed in the right place: `data/<profile>/op-reth/db` and `data/<profile>/op-reth/static_files` must exist.
-* Confirm the snapshot matches `WHITECHAIN_NETWORK` and the profile you start.
+* Confirm the backup was taken from the same `WHITECHAIN_NETWORK` and the same profile you start.
 * Make sure the node was stopped during extraction.
 
 ### Sync is slow
 
 Common causes, in order of likelihood:
 
-1. No snapshot restored on a long-running chain (`full-node`/`archive-node`), so the node re-executes from genesis. Restore one, or use `full-snap-node`.
+1. A consensus-layer profile (`full-node`/`archive-node`) on a long-running chain re-executes every transaction from genesis. Use `full-snap-node` if you need a fast bootstrap.
 2. L1 endpoint is rate-limited or slow. Switch to a faster L1 RPC and Beacon, or use your own node.
 3. Disk I/O is the bottleneck. Move `data/` to NVMe storage.
 
@@ -436,6 +448,7 @@ This setup is a follow-only RPC node. It does not include:
 * Block builder or sequencer roles
 * Batcher, proposer, or challenger
 * Flashblocks pre-confirmation stream
+* Published `op-reth` database snapshots – there are none to download. `full-snap-node` bootstraps from a trusted reth peer; `full-node` and `archive-node` sync by re-executing the chain from L1.
 
 If your application needs sub-second pre-confirmations, contact the Whitechain team for the Flashblocks WebSocket URL and a separate guide. The current `public-rpc-node` stack does not subscribe to the Flashblocks stream.
 
@@ -452,7 +465,7 @@ INFO Finished stage pipeline_stages=3/14 stage=SenderRecovery checkpoint=2611440
 
 This is reth's **staged sync** pipeline. Instead of processing each block end-to-end, reth runs the whole block range through 14 specialized stages – each stage performs one operation for the entire range, which is much faster than block-by-block processing thanks to sequential disk writes.
 
-The pipeline runs on **every profile** (`full-snap-node`, `full-node`, `archive-node`) – it is not specific to snap sync. It is used whenever op-reth is far behind the chain head: on a fresh database, after restoring a snapshot, or after significant downtime. Once the node is caught up, live blocks arrive through the Engine API (`Received new payload` / forkchoice updates) and the pipeline stays idle unless the node falls behind again.
+The pipeline runs on **every profile** (`full-snap-node`, `full-node`, `archive-node`) – it is not specific to snap sync. It is used whenever op-reth is far behind the chain head: on a fresh database or after significant downtime. Once the node is caught up, live blocks arrive through the Engine API (`Received new payload` / forkchoice updates) and the pipeline stays idle unless the node falls behind again.
 
 | # | Stage | What it does |
 | --- | --- | --- |

@@ -1,10 +1,9 @@
 name: whitechain-public-rpc
 
 x-op-reth-common: &op-reth-common
-  image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:latest}
+  platform: linux/amd64
+  image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:v2.3.3}
   restart: unless-stopped
-  networks:
-    - public_rpc
   extra_hosts:
     - "host.docker.internal:host-gateway"
   env_file:
@@ -17,10 +16,9 @@ x-op-reth-common: &op-reth-common
     start_period: 60s
 
 x-op-node-common: &op-node-common
-  image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:latest}
+  platform: linux/amd64
+  image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:v1.19.3}
   restart: unless-stopped
-  networks:
-    - public_rpc
   extra_hosts:
     - "host.docker.internal:host-gateway"
   env_file:
@@ -32,12 +30,13 @@ services:
   # Fastest and simplest bootstrap. Pruned execution state. op-node runs
   # --syncmode=execution-layer and op-reth snap-syncs the state from a
   # trusted reth peer over EL P2P (WHITECHAIN_RETH_TRUSTED_PEERS).
-  # No DB snapshot needed.
   # ----------------------------
   full-snap-node-op-reth:
     <<: *op-reth-common
     profiles: ["full-snap-node"]
     container_name: whitechain-full-snap-node-op-reth
+    networks:
+      - public_rpc_full_snap
     ports:
       - "${HOST_HTTP_PORT:-8545}:8545"
       - "${HOST_WS_PORT:-8546}:8546"
@@ -46,7 +45,7 @@ services:
     volumes:
       - ./data/full-snap-node/op-reth:/db
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
-      - ./keys/jwt.txt:/config/jwt.txt:ro
+      - ./keys/full-snap-node/jwt.txt:/config/jwt.txt:ro
     command: >
       node
       --chain=/config/genesis.json
@@ -55,11 +54,11 @@ services:
       --http
       --http.addr=0.0.0.0
       --http.port=8545
-      --http.api=eth,net,web3,rpc
+      --http.api=${HTTP_API:-eth,net,web3,rpc}
       --ws
       --ws.addr=0.0.0.0
       --ws.port=8546
-      --ws.api=eth,net,web3,rpc
+      --ws.api=${WS_API:-eth,net,web3,rpc}
       --authrpc.addr=0.0.0.0
       --authrpc.port=8551
       --authrpc.jwtsecret=/config/jwt.txt
@@ -77,6 +76,8 @@ services:
     <<: *op-node-common
     profiles: ["full-snap-node"]
     container_name: whitechain-full-snap-node-op-node
+    networks:
+      - public_rpc_full_snap
     depends_on:
       full-snap-node-op-reth:
         condition: service_healthy
@@ -87,7 +88,7 @@ services:
       - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
     volumes:
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
-      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./keys/full-snap-node/jwt.txt:/jwt.txt:ro
       - ./data/full-snap-node/op-node:/data
     command: >
       op-node
@@ -119,13 +120,15 @@ services:
   # ----------------------------
   # FULL NODE (pruned, consensus-layer sync)
   # Pruned execution state. op-node derives the chain from L1 and
-  # re-executes every block (no snap sync). Restore a DB snapshot to
-  # skip the long initial sync.
+  # re-executes every block from genesis (no snap sync), so the initial
+  # sync is long on a chain with history behind it.
   # ----------------------------
   full-node-op-reth:
     <<: *op-reth-common
     profiles: ["full-node"]
     container_name: whitechain-full-node-op-reth
+    networks:
+      - public_rpc_full
     ports:
       - "${HOST_HTTP_PORT:-8545}:8545"
       - "${HOST_WS_PORT:-8546}:8546"
@@ -134,7 +137,7 @@ services:
     volumes:
       - ./data/full-node/op-reth:/db
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
-      - ./keys/jwt.txt:/config/jwt.txt:ro
+      - ./keys/full-node/jwt.txt:/config/jwt.txt:ro
     command: >
       node
       --chain=/config/genesis.json
@@ -143,11 +146,11 @@ services:
       --http
       --http.addr=0.0.0.0
       --http.port=8545
-      --http.api=eth,net,web3,rpc
+      --http.api=${HTTP_API:-eth,net,web3,rpc}
       --ws
       --ws.addr=0.0.0.0
       --ws.port=8546
-      --ws.api=eth,net,web3,rpc
+      --ws.api=${WS_API:-eth,net,web3,rpc}
       --authrpc.addr=0.0.0.0
       --authrpc.port=8551
       --authrpc.jwtsecret=/config/jwt.txt
@@ -163,6 +166,8 @@ services:
     <<: *op-node-common
     profiles: ["full-node"]
     container_name: whitechain-full-node-op-node
+    networks:
+      - public_rpc_full
     depends_on:
       full-node-op-reth:
         condition: service_healthy
@@ -173,7 +178,7 @@ services:
       - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
     volumes:
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
-      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./keys/full-node/jwt.txt:/jwt.txt:ro
       - ./data/full-node/op-node:/data
     command: >
       op-node
@@ -203,14 +208,17 @@ services:
 
   # ----------------------------
   # ARCHIVE NODE (full history, consensus-layer sync)
-  # Full historical state + debug/trace/txpool/reth namespaces. op-node
-  # re-executes every block from L1 (no snap sync). Restore a DB snapshot
-  # to skip the long initial sync.
+  # Full historical state. Serves the same conservative namespaces as the other
+  # profiles by default; debug/trace/txpool/reth are an explicit opt-in through
+  # HTTP_API / WS_API in .env. op-node re-executes every block from L1 (no snap
+  # sync), which makes the initial sync of this profile the longest.
   # ----------------------------
   archive-node-op-reth:
     <<: *op-reth-common
     profiles: ["archive-node"]
     container_name: whitechain-archive-node-op-reth
+    networks:
+      - public_rpc_archive
     ports:
       - "${HOST_HTTP_PORT:-8545}:8545"
       - "${HOST_WS_PORT:-8546}:8546"
@@ -219,7 +227,7 @@ services:
     volumes:
       - ./data/archive-node/op-reth:/db
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/genesis.json:/config/genesis.json:ro
-      - ./keys/jwt.txt:/config/jwt.txt:ro
+      - ./keys/archive-node/jwt.txt:/config/jwt.txt:ro
     command: >
       node
       --chain=/config/genesis.json
@@ -227,11 +235,11 @@ services:
       --http
       --http.addr=0.0.0.0
       --http.port=8545
-      --http.api=eth,net,web3,rpc,debug,trace,txpool,reth
+      --http.api=${HTTP_API:-eth,net,web3,rpc}
       --ws
       --ws.addr=0.0.0.0
       --ws.port=8546
-      --ws.api=eth,net,web3,rpc
+      --ws.api=${WS_API:-eth,net,web3,rpc}
       --authrpc.addr=0.0.0.0
       --authrpc.port=8551
       --authrpc.jwtsecret=/config/jwt.txt
@@ -251,6 +259,8 @@ services:
     <<: *op-node-common
     profiles: ["archive-node"]
     container_name: whitechain-archive-node-op-node
+    networks:
+      - public_rpc_archive
     depends_on:
       archive-node-op-reth:
         condition: service_healthy
@@ -261,7 +271,7 @@ services:
       - "127.0.0.1:${HOST_OP_NODE_RPC_PORT:-9545}:9545"
     volumes:
       - ./artifacts/${WHITECHAIN_NETWORK:-mainnet}/rollup.json:/rollup.json:ro
-      - ./keys/jwt.txt:/jwt.txt:ro
+      - ./keys/archive-node/jwt.txt:/jwt.txt:ro
       - ./data/archive-node/op-node:/data
     command: >
       op-node
@@ -290,5 +300,9 @@ services:
       --metrics.port=7300
 
 networks:
-  public_rpc:
+  public_rpc_full_snap:
+    driver: bridge
+  public_rpc_full:
+    driver: bridge
+  public_rpc_archive:
     driver: bridge
