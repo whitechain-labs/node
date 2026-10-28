@@ -42,6 +42,7 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
 
 ## Requirements
 
+- An x86_64 (`linux/amd64`) Linux host – the images are not built for ARM, so Apple Silicon Macs cannot run the node
 - Docker with Compose v2
 - Your own Ethereum L1 RPC endpoint
 - Your own Ethereum L1 Beacon endpoint
@@ -86,6 +87,16 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
    artifacts/testnet/rollup.json
    ```
 
+   For **mainnet**, `genesis.json` ships zipped (about 154 MB unpacked):
+
+   ```bash
+   shasum -a 256 mainnet/genesis.json.zip mainnet/rollup.json
+   mkdir -p <this-repo>/artifacts/mainnet
+   unzip -o -d <this-repo>/artifacts/mainnet mainnet/genesis.json.zip
+   cp mainnet/rollup.json <this-repo>/artifacts/mainnet/
+   shasum -a 256 <this-repo>/artifacts/mainnet/genesis.json
+   ```
+
    The folder name must match `WHITECHAIN_NETWORK` in `.env` (`mainnet` or `testnet`). Compare the hashes yourself – this repository deliberately keeps no copy of the artifacts and no checksum file of its own, so there is a single source of truth to check against. `make up` additionally cross-checks the pair for consistency, see [Artifact validation](#artifact-validation).
 
 2. Create your `.env`:
@@ -94,7 +105,7 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
    cp .env.mainnet.example .env   # or .env.testnet.example
    ```
 
-   Fill in at least `PUBLIC_IP`, `WHITECHAIN_PUBLIC_RPC`, `L1_RPC_URL`, `L1_BEACON_URL` (see [Configuration](#configuration)). For `full-snap-node` also set `WHITECHAIN_RETH_TRUSTED_PEERS`.
+   Fill in at least `PUBLIC_IP`, `L1_RPC_URL`, `L1_BEACON_URL` (see [Configuration](#configuration)). The example files already carry the network's public RPC and bootstrap peers (`WHITECHAIN_PUBLIC_RPC`, `WHITECHAIN_RETH_TRUSTED_PEERS`, `WHITECHAIN_PUBLIC_OP_NODE_P2P`) – see [Network endpoints](#network-endpoints).
 
 3. Start the node profile you want:
 
@@ -116,6 +127,22 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
      --data '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
    ```
 
+## Network endpoints
+
+The Whitechain bootstrap nodes are the snap-sync source for `full-snap-node` and the static op-node peer for every profile. The values below are already set in `.env.mainnet.example` / `.env.testnet.example`.
+
+**Mainnet** (chain ID `1875`, L1 = Ethereum mainnet, first L2 block `50961390`)
+
+| Variable | Value |
+| --- | --- |
+| `WHITECHAIN_PUBLIC_RPC` | `https://rpc.whitechain.io` |
+| `WHITECHAIN_RETH_TRUSTED_PEERS` | `enode://ca5415059bb0e7c481bccc3704d487e1ebfb0636375dd91e6f7b0b0b013156c8bba34d37f223cdafc29364f1baabbb405243b1c9bb8abf666f5ae55a92ab030a@bootstrap.whitechain.io:30304` |
+| `WHITECHAIN_PUBLIC_OP_NODE_P2P` | `/dns4/bootstrap.whitechain.io/tcp/9222/p2p/16Uiu2HAkybwSBFB28eup6NYJHmWCyM9NdywKRY5GsUuQYkHUa3cp` |
+
+The mainnet bootstrap serves EL P2P on port **30304** (not 30303) and op-node P2P on 9222. Your node needs outbound TCP/UDP to `bootstrap.whitechain.io` on both. Explorer: `https://explorer.whitechain.io`.
+
+**Testnet** – see `.env.testnet.example`.
+
 ## Configuration
 
 Required `.env` variables:
@@ -132,7 +159,7 @@ Required `.env` variables:
 
 | Variable | Description |
 | --- | --- |
-| `WHITECHAIN_RETH_TRUSTED_PEERS` | Trusted reth enode to snap-sync from, in the form `enode://<pubkey>@<ip>:30303` |
+| `WHITECHAIN_RETH_TRUSTED_PEERS` | Trusted reth enode to snap-sync from, in the form `enode://<pubkey>@<host>:<port>` (see [Network endpoints](#network-endpoints)) |
 
 Optional variables (with defaults):
 
@@ -143,8 +170,8 @@ Optional variables (with defaults):
 | `L1_RPC_KIND` | `basic` | One of `alchemy`, `quicknode`, `infura`, `parity`, `nethermind`, `debug_geth`, `erigon`, `standard`, `any` if your provider supports extra receipt methods |
 | `WHITECHAIN_PUBLIC_OP_NODE_P2P` | empty | Static op-node peer multiaddr `/dns4/<host>/tcp/9222/p2p/<peerID>` |
 | `OP_NODE_ONLY_REQ_TO_STATIC` | `false` | Restrict unsafe-block requests to the static peer only |
-| `OP_RETH_IMAGE` | `public.ecr.aws/l8q8a0h5/op-reth:v2.3.3` | Pin the op-reth image |
-| `OP_NODE_IMAGE` | `public.ecr.aws/l8q8a0h5/op-node:v1.19.3` | Pin the op-node image |
+| `OP_RETH_IMAGE` | `public.ecr.aws/l8q8a0h5/op-reth:v2.4.4` | Pin the op-reth image |
+| `OP_NODE_IMAGE` | `public.ecr.aws/l8q8a0h5/op-node:v1.19.7` | Pin the op-node image |
 
 Archive-only RPC limits (optional):
 
@@ -287,6 +314,8 @@ make reup PROFILE=full-snap-node
 If the upgrade includes a new hardfork, pull the new `rollup.json` (and `genesis.json` if it changed) from [whitechain-bootstrap](https://github.com/whitechain-labs/whitechain-bootstrap), check it against the SHA-256 hashes published there, copy it into `artifacts/<network>/`, then `make reup`. The bootstrap repository's hashes change when a hardfork changes the artifacts, so re-verify on every such update. Apply hardfork artifacts before the activation timestamp to avoid a chain-divergence stall.
 
 ## Notes
+
+- **op-reth storage format.** Every profile starts op-reth with `--storage.v2=false`. Whitechain mainnet's genesis is a non-zero block (`50961390`); op-reth's v2 storage layout keeps changesets in static files that it cannot reopen for such a chain, so a v2 node starts once and then fails on every restart (`failed to open file "…/static_file_account-change-sets_50961390_….conf"`). The flag only decides the layout of a new database – an existing one keeps the layout recorded in its metadata. A mainnet node created without it cannot be repaired: resync it (`make down`, remove `data/<profile>/op-reth` and `data/<profile>/op-node`, `make up`).
 
 - This stack holds no project-side private keys. The sequencer, batcher, proposer, and challenger keys stay on the Whitechain side. You operate a follow-only node.
 - The Engine API on `8551` is bound only to the profile's own compose network. Do not publish it.
