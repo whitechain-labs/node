@@ -2,7 +2,7 @@ name: whitechain-public-rpc
 
 x-op-reth-common: &op-reth-common
   platform: linux/amd64
-  image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:v2.3.3}
+  image: ${OP_RETH_IMAGE:-public.ecr.aws/l8q8a0h5/op-reth:v2.4.4}
   restart: unless-stopped
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -17,7 +17,7 @@ x-op-reth-common: &op-reth-common
 
 x-op-node-common: &op-node-common
   platform: linux/amd64
-  image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:v1.19.3}
+  image: ${OP_NODE_IMAGE:-public.ecr.aws/l8q8a0h5/op-node:v1.19.7}
   restart: unless-stopped
   extra_hosts:
     - "host.docker.internal:host-gateway"
@@ -50,6 +50,7 @@ services:
       node
       --chain=/config/genesis.json
       --datadir=/db
+      --storage.v2=false
       --full
       --http
       --http.addr=0.0.0.0
@@ -142,6 +143,7 @@ services:
       node
       --chain=/config/genesis.json
       --datadir=/db
+      --storage.v2=false
       --full
       --http
       --http.addr=0.0.0.0
@@ -232,6 +234,7 @@ services:
       node
       --chain=/config/genesis.json
       --datadir=/db
+      --storage.v2=false
       --http
       --http.addr=0.0.0.0
       --http.port=8545
