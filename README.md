@@ -42,7 +42,7 @@ The stack ships three profiles. You pick one with the `PROFILE` variable (or a p
 
 ## Requirements
 
-- An x86_64 (`linux/amd64`) Linux host – the images are not built for ARM, so Apple Silicon Macs cannot run the node
+- A Linux host, x86_64 (`linux/amd64`) or ARM64 (`linux/arm64`) – the images are multi-arch, Docker pulls the variant that matches the host
 - Docker with Compose v2
 - Your own Ethereum L1 RPC endpoint
 - Your own Ethereum L1 Beacon endpoint
@@ -170,8 +170,8 @@ Optional variables (with defaults):
 | `L1_RPC_KIND` | `basic` | One of `alchemy`, `quicknode`, `infura`, `parity`, `nethermind`, `debug_geth`, `erigon`, `standard`, `any` if your provider supports extra receipt methods |
 | `WHITECHAIN_PUBLIC_OP_NODE_P2P` | empty | Static op-node peer multiaddr `/dns4/<host>/tcp/9222/p2p/<peerID>` |
 | `OP_NODE_ONLY_REQ_TO_STATIC` | `false` | Restrict unsafe-block requests to the static peer only |
-| `OP_RETH_IMAGE` | `public.ecr.aws/l8q8a0h5/op-reth:v2.4.4` | Pin the op-reth image |
-| `OP_NODE_IMAGE` | `public.ecr.aws/l8q8a0h5/op-node:v1.19.7` | Pin the op-node image |
+| `OP_RETH_IMAGE` | `public.ecr.aws/l8q8a0h5/op-reth:v2.8.2` | Pin the op-reth image |
+| `OP_NODE_IMAGE` | `public.ecr.aws/l8q8a0h5/op-node:v1.19.11` | Pin the op-node image |
 
 Archive-only RPC limits (optional):
 
